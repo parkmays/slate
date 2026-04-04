@@ -1,0 +1,109 @@
+{
+  "version": "1.1",
+  "author": "gemini-code-assist",
+  "description": "Supabase Realtime event schema for SLATE. Desktop app and web portal both subscribe to these channels.",
+  "channels": {
+    "clip:{clipId}": {
+      "description": "Per-clip channel. Subscribe when a clip is open for review or proxy generation is in progress.",
+      "events": {
+        "annotation_added": {
+          "description": "A new annotation was posted on this clip.",
+          "payload": {
+            "annotation": "Annotation (see contracts/data-model.json)"
+          }
+        },
+        "annotation_resolved": {
+          "description": "An annotation was marked resolved.",
+          "payload": {
+            "annotationId": "string (UUID)",
+            "resolvedAt": "string (ISO 8601)",
+            "resolvedBy": "string (userId)"
+          }
+        },
+        "review_status_changed": {
+          "description": "The clip's reviewStatus was updated (circled, flagged, x, etc.).",
+          "payload": {
+            "clipId": "string (UUID)",
+            "status": "ReviewStatus — unreviewed|circled|flagged|x|deprioritized",
+            "updatedBy": "string (userId or share-token)",
+            "updatedAt": "string (ISO 8601)"
+          }
+        },
+        "proxy_status_changed": {
+          "description": "Proxy generation status changed. Emitted by desktop ingest daemon.",
+          "payload": {
+            "clipId": "string (UUID)",
+            "proxyStatus": "ProxyStatus — pending|processing|ready|error",
+            "proxyR2Key": "string|null (set when status = ready)",
+            "error": "string|null (set when status = error)"
+          }
+        },
+        "ai_scores_ready": {
+          "description": "AI scoring pipeline completed. Web portal should refresh scores panel.",
+          "payload": {
+            "clipId": "string (UUID)",
+            "aiScores": "AIScores (see contracts/data-model.json)",
+            "aiProcessingStatus": "ready|error"
+          }
+        },
+        "sync_result_updated": {
+          "description": "Audio sync result was computed or manually overridden.",
+          "payload": {
+            "clipId": "string (UUID)",
+            "syncResult": "SyncResult (see contracts/data-model.json)",
+            "syncedAudioPath": "string|null"
+          }
+        }
+      }
+    },
+    "project:{projectId}": {
+      "description": "Project-wide channel. Subscribe to get updates across all clips in a project.",
+      "events": {
+        "clip_ingested": {
+          "description": "A new clip was ingested and written to the database.",
+          "payload": {
+            "clip": "Clip (see contracts/data-model.json, aiScores and annotations will be empty)"
+          }
+        },
+        "clip_proxy_ready": {
+          "description": "Proxy generation completed for a clip. Use to refresh thumbnails.",
+          "payload": {
+            "clipId": "string (UUID)",
+            "proxyR2Key": "string",
+            "thumbnailR2Key": "string"
+          }
+        },
+        "assembly_updated": {
+          "description": "An assembly was created or modified.",
+          "payload": {
+            "assembly": "Assembly (see contracts/data-model.json)"
+          }
+        },
+        "share_link_created": {
+          "description": "A new share link was generated for this project.",
+          "payload": {
+            "token": "string",
+            "scope": "project|scene|subject|assembly",
+            "expiresAt": "string (ISO 8601)"
+          }
+        }
+      }
+    },
+    "ingest:{projectId}": {
+      "description": "Ingest progress channel. Subscribe from web portal to show live ingest status.",
+      "events": {
+        "progress_update": {
+          "description": "Periodic ingest progress broadcast from desktop daemon.",
+          "payload": {
+            "report": "IngestProgressReport (see contracts/data-model.json)"
+          }
+        }
+      }
+    }
+  },
+  "subscriptionNotes": {
+    "desktop": "Subscribe to project:{projectId} and clip:{clipId} channels via Supabase Swift client",
+    "webPortal": "Subscribe to clip:{clipId} channel for review page; project:{projectId} for dashboard",
+    "authentication": "Pass Supabase JWT (internal users) or X-Share-Token header (external reviewers)"
+  }
+}

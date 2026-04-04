@@ -1,0 +1,19 @@
+{
+  "name": "@slate/shared-types",
+  "version": "1.0.0",
+  "description": "SLATE canonical TypeScript types — source of truth for all agents",
+  "main": "dist/clip.js",
+  "types": "dist/clip.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "watch": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
+}

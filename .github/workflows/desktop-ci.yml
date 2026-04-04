@@ -1,0 +1,283 @@
+name: Desktop CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'apps/desktop/**'
+      - 'packages/**'
+      - 'contracts/**'
+      - 'supabase/**'
+      - 'scripts/**'
+      - '.github/workflows/desktop-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/desktop/**'
+      - 'packages/**'
+      - 'contracts/**'
+      - 'supabase/**'
+      - 'scripts/**'
+      - '.github/workflows/desktop-ci.yml'
+
+jobs:
+  build:
+    name: Build Desktop App
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.2'
+
+      - name: Cache Swift Package Manager
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Validate Contracts
+        run: |
+          for contract in contracts/*.json; do
+            echo "Validating $contract"
+            jq empty "$contract" || exit 1
+          done
+          echo "Checking contract versions..."
+          node scripts/check-versions.js
+
+      - name: Build Ingest Daemon
+        run: |
+          cd packages/ingest-daemon
+          swift build -c release
+
+      - name: Test Ingest Daemon
+        run: |
+          cd packages/ingest-daemon
+          swift test --enable-code-coverage
+
+      - name: Build Sync Engine
+        run: |
+          cd packages/sync-engine
+          swift build -c release
+
+      - name: Test Sync Engine
+        run: |
+          cd packages/sync-engine
+          swift test --enable-code-coverage
+
+      - name: Build AI Pipeline
+        run: |
+          cd packages/ai-pipeline
+          swift build -c release
+
+      - name: Test AI Pipeline
+        run: |
+          cd packages/ai-pipeline
+          swift test --enable-code-coverage
+
+      - name: Root Swift package (integration tests)
+        continue-on-error: true
+        run: swift test -c release --filter SLATEIntegrationTests
+
+      - name: Build Desktop App
+        run: |
+          cd apps/desktop
+          xcodebuild -project SLATE.xcodeproj \
+                     -scheme SLATE \
+                     -configuration Release \
+                     -derivedDataPath DerivedData \
+                     -enableCodeCoverage YES \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     build
+
+      - name: Run Desktop Tests
+        run: |
+          cd apps/desktop
+          xcodebuild -project SLATE.xcodeproj \
+                     -scheme SLATE \
+                     -configuration Release \
+                     -derivedDataPath DerivedData \
+                     -enableCodeCoverage YES \
+                     -destination 'platform=macOS' \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     test
+
+      - name: Merge LLVM profdata (artifact)
+        continue-on-error: true
+        run: |
+          mkdir -p coverage-report
+          PROF=$(find . -name '*.profdata' -not -path './apps/desktop/DerivedData/*' 2>/dev/null | tr '\n' ' ')
+          if [ -n "$PROF" ]; then
+            xcrun llvm-profdata merge -sparse $PROF -output coverage-merged.profdata && \
+            cp coverage-merged.profdata coverage-report/ || true
+          fi
+          echo "Note: upload Codecov from a single exported LCOV/XCResult in a follow-up if needed."
+
+      - name: Upload coverage artifacts
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-profdata
+          path: |
+            coverage-merged.profdata
+          if-no-files-found: ignore
+
+      - name: Upload coverage to Codecov
+        continue-on-error: true
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Archive Build
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd apps/desktop
+          xcodebuild -project SLATE.xcodeproj \
+                     -scheme SLATE \
+                     -configuration Release \
+                     -derivedDataPath DerivedData \
+                     -archivePath SLATE.xcarchive \
+                     archive
+
+      - name: Export App
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd apps/desktop
+          xcodebuild -exportArchive \
+                     -archivePath SLATE.xcarchive \
+                     -exportPath . \
+                     -exportOptionsPlist ExportOptions.plist
+
+      - name: Notarize App
+        if: github.ref == 'refs/heads/main'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cd apps/desktop
+          xcrun notarytool submit \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait \
+            SLATE.app
+          xcrun stapler staple SLATE.app
+
+      - name: Create DMG
+        if: github.ref == 'refs/heads/main'
+        run: |
+          hdiutil create -volname "SLATE" \
+                       -srcfolder "apps/desktop/SLATE.app" \
+                       -ov -format UDZO \
+                       "SLATE-${{ github.sha }}.dmg"
+
+      - name: Upload Artifacts
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SLATE-macOS
+          path: |
+            SLATE-*.dmg
+          retention-days: 30
+
+  security-scan:
+    name: Security Scan
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run SwiftLint
+        continue-on-error: true
+        run: |
+          if ! command -v swiftlint &> /dev/null; then
+            brew install swiftlint
+          fi
+          swiftlint lint --strict || true
+
+      - name: Scan for Secrets (PR — git range)
+        if: github.event_name == 'pull_request'
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+
+      - name: Scan for Secrets (push — git range)
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.before }}
+          head: ${{ github.event.after }}
+
+      - name: Scan for Secrets (filesystem — new branch / no parent SHA)
+        if: github.event_name == 'push' && (github.event.before == '0000000000000000000000000000000000000000' || github.event.before == '')
+        run: |
+          brew install trufflehog
+          trufflehog filesystem . --fail
+
+  performance-test:
+    name: Performance Tests
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.2'
+
+      - name: Run sync accuracy benchmark (Swift PM)
+        run: bash scripts/slate-run-sync-benchmark.sh
+
+      - name: Benchmark Results (desktop xcresult, optional)
+        continue-on-error: true
+        run: |
+          cd apps/desktop
+          xcodebuild -project SLATE.xcodeproj \
+                     -scheme SLATE \
+                     -configuration Release \
+                     -derivedDataPath DerivedData \
+                     build-for-testing
+          xcodebuild test \
+                     -project SLATE.xcodeproj \
+                     -scheme SLATE \
+                     -configuration Release \
+                     -derivedDataPath DerivedData \
+                     -destination 'platform=macOS' \
+                     -only-testing:SLATEDesktopTests \
+                     || true
+
+      - name: Parse benchmarks
+        continue-on-error: true
+        run: |
+          python3 scripts/parse-benchmarks.py \
+            --input "apps/desktop/DerivedData/Logs/Test" \
+            --output benchmark-results.json || echo "{}" > benchmark-results.json
+
+      - name: Upload Benchmarks
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.json

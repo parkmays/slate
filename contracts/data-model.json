@@ -1,0 +1,151 @@
+{
+  "version": "1.2",
+  "author": "claude-code",
+  "description": "Universal Clip object schema. v1.2 adds proxyLUT, proxyColorSpace, cameraGroupId fields and cameraGroupSyncResult type. All agents must update their Clip models to include these optional fields.",
+  "clip": {
+    "id": "string (UUID v4)",
+    "projectId": "string (UUID)",
+    "checksum": "string (SHA-256 hex)",
+    "sourcePath": "string (absolute path — READ ONLY)",
+    "sourceSize": "number (bytes)",
+    "sourceFormat": "string (BRAW|ARRIRAW|ProRes422HQ|H264|MXF|R3D)",
+    "sourceFps": "number (23.976|24|25|29.97|30|48|60)",
+    "sourceTimecodeStart": "string (HH:MM:SS:FF)",
+    "duration": "number (seconds)",
+    "proxyPath": "string|null (canonical R2 key: r2://{bucket}/{projectId}/{clipId}/proxy.mp4)",
+    "proxyStatus": "pending|processing|ready|error",
+    "proxyChecksum": "string|null",
+    "proxyLUT": "string|null (LUT applied during proxy gen: arri_logc3_rec709 | bm_film_gen5_rec709 | red_ipp2_rec709 | none)",
+    "proxyColorSpace": "string|null (always rec709 when LUT applied, log when pass-through)",
+    "narrativeMeta": "NarrativeMeta|null",
+    "documentaryMeta": "DocumentaryMeta|null",
+    "audioTracks": "AudioTrack[]",
+    "syncResult": "SyncResult",
+    "syncedAudioPath": "string|null",
+    "cameraGroupId": "string|null (UUID — links clips that were shot simultaneously as a multi-cam group)",
+    "cameraAngle": "string|null (A|B|C|D — camera angle within the group)",
+    "aiScores": "AIScores|null",
+    "transcriptId": "string|null",
+    "aiProcessingStatus": "pending|processing|ready|error",
+    "reviewStatus": "unreviewed|circled|flagged|x|deprioritized",
+    "annotations": "Annotation[]",
+    "approvalStatus": "pending|reviewed|approved",
+    "approvedBy": "string|null",
+    "approvedAt": "string|null (ISO 8601)",
+    "ingestedAt": "string (ISO 8601)",
+    "updatedAt": "string (ISO 8601)",
+    "projectMode": "narrative|documentary",
+    "cameraMetadata": "CameraMetadata|null"
+  },
+  "narrativeMeta": {
+    "sceneNumber": "string",
+    "shotCode": "string",
+    "takeNumber": "number",
+    "cameraId": "string",
+    "scriptPage": "string|null",
+    "setUpDescription": "string|null",
+    "director": "string|null",
+    "dp": "string|null"
+  },
+  "documentaryMeta": {
+    "subjectName": "string",
+    "subjectId": "string",
+    "shootingDay": "number",
+    "sessionLabel": "string",
+    "location": "string|null",
+    "topicTags": "string[]",
+    "interviewerOffscreen": "boolean"
+  },
+  "audioTrack": {
+    "trackIndex": "number",
+    "role": "boom|lav|mix|iso|unknown",
+    "channelLabel": "string",
+    "sampleRate": "number",
+    "bitDepth": "number"
+  },
+  "syncResult": {
+    "confidence": "high|medium|low|manual_required|unsynced",
+    "method": "waveform_correlation|timecode|manual|none",
+    "offsetFrames": "number",
+    "driftPPM": "number",
+    "clapDetectedAt": "number|null",
+    "verifiedAt": "string|null (ISO 8601)"
+  },
+  "aiScores": {
+    "composite": "number (0-100)",
+    "focus": "number (0-100)",
+    "exposure": "number (0-100)",
+    "stability": "number (0-100)",
+    "audio": "number (0-100)",
+    "performance": "number|null (narrative only)",
+    "contentDensity": "number|null (documentary only)",
+    "scoredAt": "string (ISO 8601)",
+    "modelVersion": "string",
+    "reasoning": "ScoreReason[]"
+  },
+  "scoreReason": {
+    "dimension": "string",
+    "score": "number",
+    "flag": "info|warning|error",
+    "message": "string",
+    "timecode": "string|null"
+  },
+  "annotation": {
+    "id": "string (UUID)",
+    "userId": "string",
+    "userDisplayName": "string",
+    "timecodeIn": "string",
+    "timecodeOut": "string|null",
+    "body": "string",
+    "type": "text|voice",
+    "voiceUrl": "string|null",
+    "createdAt": "string (ISO 8601)",
+    "resolvedAt": "string|null (ISO 8601)"
+  },
+  "project": {
+    "id": "string (UUID v4)",
+    "name": "string",
+    "mode": "narrative|documentary",
+    "createdAt": "string (ISO 8601)",
+    "updatedAt": "string (ISO 8601)",
+    "notificationTargets": "DeliveryTarget[]",
+    "autoDeliverOnAssembly": "boolean"
+  },
+  "deliveryTarget": {
+    "name": "string",
+    "method": "iMessage|email|slack",
+    "address": "string"
+  },
+  "cameraMetadata": {
+    "cameraModel": "string|null",
+    "cameraSerialNumber": "string|null",
+    "lensModel": "string|null",
+    "focalLength": "number|null (mm)",
+    "aperture": "number|null (f-stop)",
+    "iso": "number|null",
+    "recordingFormat": "string|null",
+    "recordingDate": "string|null (ISO 8601)",
+    "codec": "string|null (FourCC)",
+    "width": "number|null",
+    "height": "number|null",
+    "frameRate": "number|null",
+    "colorSpace": "string|null",
+    "duration": "number|null (seconds)",
+    "bitrate": "number|null (bits/sec)"
+  },
+  "cameraGroupSyncResult": {
+    "groupId": "string (UUID — matches Clip.cameraGroupId)",
+    "primaryAngle": "string (A|B|C|D — the angle all others are offset from)",
+    "offsets": "CameraGroupOffset[]",
+    "overallConfidence": "high|medium|low|manual_required",
+    "syncedAt": "string (ISO 8601)"
+  },
+  "cameraGroupOffset": {
+    "angle": "string (A|B|C|D)",
+    "clipId": "string (UUID — references the Clip for this angle)",
+    "offsetFrames": "number (positive = this angle is ahead of primary)",
+    "offsetSeconds": "number",
+    "confidence": "high|medium|low|manual_required",
+    "method": "timecodeMetadata|slateDetection|audioCorrelation|manual"
+  }
+}

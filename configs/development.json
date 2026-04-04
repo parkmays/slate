@@ -1,0 +1,114 @@
+{
+  "environment": "development",
+  "version": "1.2.0",
+  "syncEngine": {
+    "confidenceThresholds": {
+      "high": 0.8,
+      "medium": 0.6,
+      "low": 0.4,
+      "maxDriftHighPPM": 10.0,
+      "maxDriftMediumPPM": 30.0,
+      "maxOffsetHighFrames": 1,
+      "maxOffsetMediumFrames": 5
+    },
+    "performance": {
+      "fftThresholdBytes": 5000000,
+      "fftThresholdSamples": 200,
+      "maxConcurrentOperations": 2,
+      "streamingMemoryLimit": 5000000,
+      "streamingChunkSize": 24000,
+      "enableGPUAcceleration": true
+    },
+    "audio": {
+      "defaultSampleRate": 48000,
+      "correlationSampleRate": 8000,
+      "antiAliasFilterLength": 32,
+      "antiAliasCutoffRatio": 0.8,
+      "minDurationSeconds": 0.1,
+      "roleClassificationDuration": 10.0
+    },
+    "limits": {
+      "maxInMemoryFileSize": 10000000,
+      "maxDurationSeconds": 300,
+      "syncTimeoutSeconds": 30,
+      "aiTimeoutSeconds": 60
+    }
+  },
+  "aiPipeline": {
+    "vision": {
+      "sampleFPS": 1,
+      "useCoreML": false,
+      "useOptimized": true,
+      "adaptiveSamplingThreshold": 60,
+      "metal": {
+        "enabled": false,
+        "maxThreadsPerGroup": 256,
+        "threadgroupMemorySize": 16384
+      }
+    },
+    "audio": {
+      "silenceThreshold": 0.02,
+      "clippingThreshold": 0.9,
+      "noiseFloorThreshold": 0.002
+    },
+    "transcription": {
+      "model": "base",
+      "language": "en",
+      "enableTimestamps": true,
+      "minWordConfidence": 0.3
+    },
+    "performance": {
+      "contentDensityWeight": 0.5,
+      "performanceWeight": 0.5
+    },
+    "models": {
+      "degradation": {
+        "maxConsecutiveFailures": 5,
+        "cooldownPeriod": 60,
+        "performanceThreshold": 120,
+        "confidenceThreshold": 0.2
+      },
+      "confidenceTracking": {
+        "maxHistorySize": 500,
+        "enableTrendAnalysis": true,
+        "trendWindowSize": 5
+      },
+      "caching": {
+        "enabled": true,
+        "maxSize": 100,
+        "ttl": 300,
+        "includeChecksum": false
+      }
+    }
+  },
+  "logging": {
+    "level": "debug",
+    "structured": true,
+    "filePath": "",
+    "maxFileSize": 1000000,
+    "maxFiles": 3,
+    "enableMetrics": true
+  },
+  "monitoring": {
+    "healthCheckInterval": 10,
+    "metricsExportInterval": 30,
+    "alertThresholds": {
+      "errorRate": 0.2,
+      "averageLatency": 120,
+      "memoryUsage": 0.9,
+      "cpuUsage": 0.95
+    }
+  },
+  "resources": {
+    "maxConcurrentClips": 4,
+    "tempDirectory": "./tmp",
+    "cacheDirectory": "./cache",
+    "modelDirectory": "./models"
+  },
+  "debug": {
+    "enableVerboseLogging": true,
+    "saveIntermediateResults": true,
+    "disableOptimizations": false,
+    "mockExternalServices": true
+  }
+}

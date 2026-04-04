@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --slate: #0D1117;
+    --slate-mid: #161B22;
+    --slate-edge: #21262D;
+    --amber: #F0A500;
+    --amber-dim: #7A5200;
+    --teal: #1AAFA0;
+    --teal-dim: #0D5750;
+    --red: #E05252;
+    --text-primary: #E6EDF3;
+    --text-secondary: #8B949E;
+    --text-muted: #484F58;
+    --border: rgba(255,255,255,0.06);
+    --border-bright: rgba(255,255,255,0.12);
+    --font-display: 'Syne', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+  }
+
+  body {
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.7;
+    padding: 0;
+  }
+
+  .doc-shell {
+    background: var(--slate);
+    border-radius: 12px;
+    border: 1px solid var(--border-bright);
+    overflow: hidden;
+  }
+
+  /* ── HEADER ── */
+  .doc-header {
+    background: var(--slate-mid);
+    border-bottom: 1px solid var(--border-bright);
+    padding: 28px 36px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+  }
+
+  .brand-mark {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .brand-mark .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--amber);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .brand-name {
+    font-family: var(--font-display);
+    font-size: 52px;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    color: var(--text-primary);
+  }
+
+  .brand-name span {
+    color: var(--amber);
+  }
+
+  .brand-sub {
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    max-width: 320px;
+    line-height: 1.5;
+    margin-top: 8px;
+  }
+
+  .doc-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    min-width: 160px;
+  }
+
+  .meta-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    background: var(--border);
+    border: 1px solid var(--border-bright);
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+
+  .meta-pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--amber);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── NAV TABS ── */
+  .nav-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--slate-mid);
+    padding: 0 36px;
+    overflow-x: auto;
+  }
+
+  .nav-tab {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    padding: 12px 18px;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+    text-transform: uppercase;
+  }
+
+  .nav-tab:hover { color: var(--text-secondary); }
+  .nav-tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+  /* ── CONTENT ── */
+  .doc-body {
+    padding: 36px;
+    display: flex;
+    gap: 36px;
+  }
+
+  .content-main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .content-aside {
+    width: 220px;
+    flex-shrink: 0;
+  }
+
+  /* ── SECTION ── */
+  .section {
+    display: none;
+  }
+  .section.active {
+    display: block;
+  }
+
+  /* ── SECTION HEADING ── */
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--amber);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .section-title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    line-height: 1.2;
+  }
+
+  .section-intro {
+    font-size: 14px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    margin-bottom: 28px;
+    border-left: 2px solid var(--amber-dim);
+    padding-left: 16px;
+  }
+
+  /* ── FEATURE CARDS ── */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .feature-card {
+    background: var(--slate-mid);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    transition: border-color 0.2s;
+  }
+
+  .feature-card:hover {
+    border-color: var(--border-bright);
+  }
+
+  .feature-card .fc-icon {
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    background: var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    margin-bottom: 10px;
+  }
+
+  .feature-card .fc-title {
+    font-family: var(--font-display);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .feature-card .fc-desc {
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  /* ── SPEC BLOCKS ── */
+  .spec-block {
+    background: var(--slate-mid);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .spec-block-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .spec-num {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--teal);
+    background: var(--teal-dim);
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+
+  .spec-title {
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .spec-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .spec-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .spec-list li::before {
+    content: '—';
+    color: var(--amber-dim);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* ── TECH STACK ── */
+  .tech-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .tech-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--teal);
+    background: rgba(26,175,160,0.08);
+    border: 1px solid rgba(26,175,160,0.2);
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+
+  .tech-tag.amber {
+    color: var(--amber);
+    background: rgba(240,165,0,0.08);
+    border-color: rgba(240,165,0,0.2);
+  }
+
+  .tech-tag.red {
+    color: var(--red);
+    background: rgba(224,82,82,0.08);
+    border-color: rgba(224,82,82,0.2);
+  }
+
+  /* ── PHASE TIMELINE ── */
+  .phase-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+
+  .phase-timeline::before {
+    content: '';
+    position: absolute;
+    left: 14px;
+    top: 20px;
+    bottom: 20px;
+    width: 1px;
+    background: var(--border-bright);
+  }
+
+  .phase-item {
+    display: flex;
+    gap: 16px;
+    padding-bottom: 20px;
+    position: relative;
+  }
+
+  .phase-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--slate-mid);
+    border: 1px solid var(--border-bright);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--amber);
+    position: relative;
+    z-index: 1;
+  }
+
+  .phase-content .phase-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .phase-content .phase-name {
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 2px 0 6px;
+  }
+
+  .phase-content .phase-desc {
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  /* ── UX FLOWS ── */
+  .flow-box {
+    background: var(--slate-mid);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .flow-box-title {
+    font-family: var(--font-display);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .flow-badge {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 7px;
+    border-radius: 4px;
+  }
+
+  .flow-badge.desktop { background: rgba(240,165,0,0.12); color: var(--amber); }
+  .flow-badge.mobile { background: rgba(26,175,160,0.12); color: var(--teal); }
+  .flow-badge.web { background: rgba(224,82,82,0.12); color: var(--red); }
+  .flow-badge.all { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+
+  .flow-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .flow-step {
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    align-items: flex-start;
+  }
+
+  .flow-step-n {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    min-width: 16px;
+    padding-top: 2px;
+  }
+
+  /* ── ASIDE ── */
+  .aside-section {
+    margin-bottom: 24px;
+  }
+
+  .aside-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .aside-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+
+  .aside-item:last-child { border-bottom: none; }
+
+  .aside-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .aside-dot.amber { background: var(--amber); }
+  .aside-dot.teal { background: var(--teal); }
+  .aside-dot.red { background: var(--red); }
+  .aside-dot.gray { background: var(--text-muted); }
+
+  .aside-item-text {
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    flex: 1;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 24px 0;
+  }
+
+  /* ── COPY PROMPT ── */
+  .prompt-box {
+    background: #0A0D10;
+    border: 1px solid var(--border-bright);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+
+  .prompt-box pre {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .prompt-box .copy-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    background: var(--border);
+    border: 1px solid var(--border-bright);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.06em;
+  }
+
+  .prompt-box .copy-btn:hover {
+    color: var(--amber);
+    border-color: var(--amber-dim);
+  }
+
+  .highlight { color: var(--amber); }
+  .highlight-teal { color: var(--teal); }
+
+</style>
+</head>
+<body>
+<div class="doc-shell">
+
+  <!-- HEADER -->
+  <div class="doc-header">
+    <div class="brand-mark">
+      <span class="eyebrow">Product Requirements Prompt</span>
+      <div class="brand-name">SL<span>A</span>TE</div>
+      <div class="brand-sub">AI-powered dailies processing, audio sync, and rough-cut assembly for narrative and documentary production.</div>
+    </div>
+    <div class="doc-meta">
+      <div class="meta-pill"><span class="dot"></span> v0.1 DRAFT</div>
+      <div class="meta-pill">DESKTOP · MOBILE · WEB</div>
+      <div class="meta-pill">Mountain Top Pictures</div>
+    </div>
+  </div>
+
+  <!-- NAV -->
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="showSection('overview')">Overview</button>
+    <button class="nav-tab" onclick="showSection('features')">Core Features</button>
+    <button class="nav-tab" onclick="showSection('ux')">UX Flows</button>
+    <button class="nav-tab" onclick="showSection('ai')">AI Engine</button>
+    <button class="nav-tab" onclick="showSection('tech')">Tech Stack</button>
+    <button class="nav-tab" onclick="showSection('phases')">Phases</button>
+    <button class="nav-tab" onclick="showSection('prompt')">Full Prompt</button>
+  </div>
+
+  <!-- BODY -->
+  <div class="doc-body">
+    <div class="content-main">
+
+      <!-- OVERVIEW -->
+      <div class="section active" id="section-overview">
+        <div class="section-label">Product Vision</div>
+        <div class="section-title">Dailies shouldn't slow you down.</div>
+        <div class="section-intro">
+          SLATE is a cross-platform production tool that ingests raw camera footage, automatically syncs audio, scores and sorts takes by quality without discarding anything, and assembles scene-based or subject-based rough cuts for review — all accelerated by AI. Built equally for scripted narrative and documentary workflows.
+        </div>
+
+        <div class="feature-grid">
+          <div class="feature-card">
+            <div class="fc-icon">🎬</div>
+            <div class="fc-title">Automated ingest</div>
+            <div class="fc-desc">Watch folders, network drives, and cloud storage. Pulls from any source automatically.</div>
+          </div>
+          <div class="feature-card">
+            <div class="fc-icon">🔊</div>
+            <div class="fc-title">Auto audio sync</div>
+            <div class="fc-desc">Waveform and timecode matching. Handles multiple ISO tracks and boom + lav combos.</div>
+          </div>
+          <div class="feature-card">
+            <div class="fc-icon">⭐</div>
+            <div class="fc-title">Smart take scoring</div>
+            <div class="fc-desc">AI ranks takes by focus, exposure, performance cues, and tech errors — never deletes.</div>
+          </div>
+          <div class="feature-card">
+            <div class="fc-icon">✂️</div>
+            <div class="fc-title">Rough cut assembly</div>
+            <div class="fc-desc">Auto-assembles scene EDL or subject-based cuts for director review in seconds.</div>
+          </div>
+          <div class="feature-card">
+            <div class="fc-icon">🎥</div>
+            <div class="fc-title">Narrative + doc modes</div>
+            <div class="fc-desc">Scene/slate-based for scripted; subject/theme-based for documentary and vérité.</div>
+          </div>
+          <div class="feature-card">
+            <div class="fc-icon">💬</div>
+            <div class="fc-title">Frame-level annotations</div>
+            <div class="fc-desc">Directors and producers leave timestamped notes. All reviewers see the same version.</div>
+          </div>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header">
+            <span class="spec-num">CORE PRINCIPLE</span>
+            <span class="spec-title">Nothing is ever thrown away</span>
+          </div>
+          <ul class="spec-list">
+            <li>Bad takes are <strong>deprioritized</strong>, not deleted. They remain accessible at all times with a single filter toggle.</li>
+            <li>AI scores are <strong>advisory</strong> — the editor, director, or producer always has final authority on take selection.</li>
+            <li>All original media is preserved and linked. SLATE only ever creates proxy references and metadata overlays.</li>
+            <li>Score reasoning is shown inline: "Focus soft at 0:02 — subject blinked" — not a black box.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- FEATURES -->
+      <div class="section" id="section-features">
+        <div class="section-label">Feature Specifications</div>
+        <div class="section-title">What SLATE does, in detail.</div>
+        <div class="section-intro">Full feature set across ingest, AI processing, review, and export. Each spec block maps to a discrete development scope.</div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">F-01</span><span class="spec-title">Ingest & Media Management</span></div>
+          <ul class="spec-list">
+            <li>Watch folder monitoring on local drives, network volumes (SMB/NFS), and cloud (S3/GCS/Backblaze B2)</li>
+            <li>Accepts all major camera formats: ARRIRAW, BRAW, ProRes, R3D, MP4/H.264, MXF</li>
+            <li>Auto-detects scene/slate/take from filename, metadata XMP, and embedded SMPTE timecode</li>
+            <li>Generates LUT-baked proxy (H.264 1080p) alongside original — originals are never touched</li>
+            <li>Checksum verification on ingest; alerts on corrupt files before processing begins</li>
+            <li>Batch import from camera cards and frame.io via API</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">F-02</span><span class="spec-title">AI Audio Sync</span></div>
+          <ul class="spec-list">
+            <li>Primary sync via clap detection + waveform cross-correlation (handles double-claps, missed slates)</li>
+            <li>Fallback to SMPTE timecode or Ambient/Ambient-compatible metadata</li>
+            <li>Multi-track ISO support: auto-assigns boom, lav channels with configurable mix preference</li>
+            <li>Drift correction over long takes (auto-conforms audio to camera sample rate)</li>
+            <li>Outputs polyphonic XML (FCPXML, AAF, OMF) for downstream delivery to post</li>
+            <li>Manual override: drag-sync in the waveform editor if AI sync misses</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">F-03</span><span class="spec-title">Take Scoring & Ranking</span></div>
+          <ul class="spec-list">
+            <li>Computer vision analysis: focus detection, exposure clipping, motion blur, lens flare, blocking errors</li>
+            <li>Audio analysis: clipping, background noise spikes, proximity, missing channels</li>
+            <li>Performance scoring (narrative mode): transcription + speech analysis for flub detection, energy, pacing</li>
+            <li>Documentary mode: content analysis scores based on subject clarity, interview intelligibility, emotional register</li>
+            <li>Each take receives a composite score (0–100) with per-dimension breakdown visible on hover</li>
+            <li>User can adjust scoring weights per project (e.g. prioritize audio over picture for dialogue scenes)</li>
+            <li>Filtered views: "Best take per setup," "All circled takes," "All takes" — default shows top 3 per scene</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">F-04</span><span class="spec-title">Rough Cut Assembly</span></div>
+          <ul class="spec-list">
+            <li>Narrative mode: assembles EDL/XML using highest-scored take per setup, organized by scene then shot</li>
+            <li>Documentary mode: assembles by subject/interview subject, or by theme/topic tags assigned during review</li>
+            <li>Director's cut mode: manual take selections override AI picks in the assembly</li>
+            <li>Output: FCPXML (Final Cut Pro X), EDL (Avid, Premiere), DaVinci Resolve XML</li>
+            <li>Assembly preview plays directly in SLATE before export — annotate and adjust before sending to editor</li>
+            <li>Version history: each assembly export is versioned and can be recalled or compared</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">F-05</span><span class="spec-title">Review & Annotation</span></div>
+          <ul class="spec-list">
+            <li>Frame-accurate commenting: click any frame, leave a text or voice note</li>
+            <li>Circle/X/Flag system maps to FCP/Avid metadata on export</li>
+            <li>Multi-user review with presence indicators (who's watching what right now)</li>
+            <li>Director approval workflow: takes move from "Pending" → "Reviewed" → "Approved" state</li>
+            <li>Shareable review links (time-limited, no login required for guest reviewers)</li>
+            <li>Mobile review: full playback, annotation, and approval on iPhone/iPad</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- UX FLOWS -->
+      <div class="section" id="section-ux">
+        <div class="section-label">User Experience</div>
+        <div class="section-title">How the product feels to use.</div>
+        <div class="section-intro">Three platform surfaces with shared data, each optimized for its context. Desktop does the heavy work. Mobile enables anywhere review. Web is the shareable, lightweight review portal.</div>
+
+        <div class="flow-box">
+          <div class="flow-box-title"><span class="flow-badge desktop">Desktop</span> Morning Dailies — DIT / Post Coordinator</div>
+          <div class="flow-steps">
+            <div class="flow-step"><span class="flow-step-n">01</span>Card is mounted — SLATE auto-detects and begins ingest. No action needed.</div>
+            <div class="flow-step"><span class="flow-step-n">02</span>Proxy generation and audio sync run in background. Progress bar in menu bar icon.</div>
+            <div class="flow-step"><span class="flow-step-n">03</span>Processing complete notification. Opens to today's dailies organized by scene.</div>
+            <div class="flow-step"><span class="flow-step-n">04</span>Coordinator reviews AI scores, promotes or demotes takes, adds production notes.</div>
+            <div class="flow-step"><span class="flow-step-n">05</span>One click generates rough cut assembly and sends director review link.</div>
+          </div>
+        </div>
+
+        <div class="flow-box">
+          <div class="flow-box-title"><span class="flow-badge mobile">Mobile</span> On-set Review — Director / Producer</div>
+          <div class="flow-steps">
+            <div class="flow-step"><span class="flow-step-n">01</span>Push notification: "Yesterday's dailies are ready." Opens to scene list.</div>
+            <div class="flow-step"><span class="flow-step-n">02</span>Swipe through top-scored takes per setup with waveform and score overlay.</div>
+            <div class="flow-step"><span class="flow-step-n">03</span>Tap to leave a voice memo or text note on any frame.</div>
+            <div class="flow-step"><span class="flow-step-n">04</span>Approve or flag takes. Changes sync instantly to desktop and web.</div>
+            <div class="flow-step"><span class="flow-step-n">05</span>Share assembly preview link with editor or studio exec directly from the app.</div>
+          </div>
+        </div>
+
+        <div class="flow-box">
+          <div class="flow-box-title"><span class="flow-badge web">Web</span> Remote Review — Executive / Client</div>
+          <div class="flow-steps">
+            <div class="flow-step"><span class="flow-step-n">01</span>Receives a time-limited secure link. No account required to view.</div>
+            <div class="flow-step"><span class="flow-step-n">02</span>Plays back assembly in browser with frame-accurate scrubbing.</div>
+            <div class="flow-step"><span class="flow-step-n">03</span>Leaves timestamped comments visible to the production team in real time.</div>
+            <div class="flow-step"><span class="flow-step-n">04</span>Can request alternate takes (if permitted by link permissions).</div>
+            <div class="flow-step"><span class="flow-step-n">05</span>Production team sees all feedback consolidated in the main SLATE dashboard.</div>
+          </div>
+        </div>
+
+        <div class="flow-box">
+          <div class="flow-box-title"><span class="flow-badge all">All Platforms</span> Documentary Mode — Producer / Director</div>
+          <div class="flow-steps">
+            <div class="flow-step"><span class="flow-step-n">01</span>Footage organized by interview subject or shooting day, not scene/slate.</div>
+            <div class="flow-step"><span class="flow-step-n">02</span>AI transcribes all interviews. Full text search across all dailies footage.</div>
+            <div class="flow-step"><span class="flow-step-n">03</span>Tag any clip with topic/theme keywords (e.g. "origin story," "conflict," "resolution").</div>
+            <div class="flow-step"><span class="flow-step-n">04</span>Assemble rough cut by dragging theme bins into an outline structure.</div>
+            <div class="flow-step"><span class="flow-step-n">05</span>Export paper cut or assembly XML to editor's NLE of choice.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI ENGINE -->
+      <div class="section" id="section-ai">
+        <div class="section-label">AI Architecture</div>
+        <div class="section-title">What's under the hood.</div>
+        <div class="section-intro">SLATE uses a multi-model AI pipeline. Each task routes to the right model — nothing is over-engineered. All AI outputs are transparent and overrideable.</div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">AI-01</span><span class="spec-title">Transcription Engine</span></div>
+          <ul class="spec-list">
+            <li>WhisperX (local, on-device) for privacy-sensitive productions; hosted Whisper API as optional cloud fallback</li>
+            <li>Speaker diarization: automatically labels who is speaking (Interview A, B, etc.) for documentary transcripts</li>
+            <li>Transcripts are searchable, exportable as SRT/WebVTT, and synced to timecode for paper-cut workflows</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">AI-02</span><span class="spec-title">Vision Analysis</span></div>
+          <ul class="spec-list">
+            <li>Frame sampling at configurable intervals (default: 2fps) to detect technical quality issues</li>
+            <li>Focus map: uses face detection + depth estimation to score subject sharpness vs background</li>
+            <li>Exposure analysis: histogram-based clipping detection, flags both over and under-exposure</li>
+            <li>Motion analysis: camera shake, unwanted blur, subject tracking confidence</li>
+            <li>Models: YOLO v8 (object detection), DepthAnything v2 (depth), custom classifier trained on film QC datasets</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">AI-03</span><span class="spec-title">Performance & Content Scoring</span></div>
+          <ul class="spec-list">
+            <li>Narrative: cross-references script text (if provided) against transcript — flags flubs, missed lines, ad-libs</li>
+            <li>Prosody analysis: speech energy, pacing, pauses — helpful signal for emotional performance quality</li>
+            <li>Documentary: semantic analysis of interview content to surface thematically rich moments</li>
+            <li>All scoring is optional and can be disabled per project. Models run locally on Apple Silicon via CoreML / MLX</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">AI-04</span><span class="spec-title">Audio Sync AI</span></div>
+          <ul class="spec-list">
+            <li>Primary: FFT-based waveform cross-correlation — handles noisy sets, double-claps, missed slates</li>
+            <li>Secondary: SMPTE timecode reader (LTC and VITC) as ground-truth fallback</li>
+            <li>Confidence score per sync: green (high confidence), yellow (manual verify recommended), red (manual required)</li>
+            <li>Drift monitoring: checks sync at regular intervals during long takes, auto-corrects or flags drift</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- TECH STACK -->
+      <div class="section" id="section-tech">
+        <div class="section-label">Technical Architecture</div>
+        <div class="section-title">How it's built.</div>
+        <div class="section-intro">SLATE is designed to run processing locally on Apple Silicon with optional cloud sync. All media stays on set — only metadata and proxies are ever sent to the cloud.</div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">PLATFORM</span><span class="spec-title">Desktop (macOS — Primary)</span></div>
+          <div class="tech-row">
+            <span class="tech-tag amber">Swift / SwiftUI</span>
+            <span class="tech-tag amber">Core ML / MLX</span>
+            <span class="tech-tag amber">AVFoundation</span>
+            <span class="tech-tag amber">Core Data</span>
+            <span class="tech-tag amber">Metal</span>
+          </div>
+          <ul class="spec-list">
+            <li>Native macOS app optimized for Apple Silicon (M1/M2/M3/M4). All AI models run on-device via MLX.</li>
+            <li>GPU-accelerated proxy transcode using VideoToolbox and Metal Performance Shaders</li>
+            <li>Background daemon handles watch-folder monitoring even when app is closed</li>
+            <li>Menu bar icon with progress indicators and quick-access shortcuts</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">PLATFORM</span><span class="spec-title">Mobile (iOS/iPadOS)</span></div>
+          <div class="tech-row">
+            <span class="tech-tag teal">Swift / SwiftUI</span>
+            <span class="tech-tag teal">AVKit</span>
+            <span class="tech-tag teal">CloudKit</span>
+            <span class="tech-tag teal">Push Notifications</span>
+          </div>
+          <ul class="spec-list">
+            <li>Optimized for review, annotation, and approval — not media processing (handled by desktop)</li>
+            <li>Offline mode: proxies cached locally for review on set without WiFi</li>
+            <li>iPad split-screen: notes and playback side by side</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">PLATFORM</span><span class="spec-title">Web (Review Portal)</span></div>
+          <div class="tech-row">
+            <span class="tech-tag red">Next.js 14</span>
+            <span class="tech-tag red">React</span>
+            <span class="tech-tag red">HLS.js</span>
+            <span class="tech-tag red">tRPC</span>
+            <span class="tech-tag red">Vercel</span>
+          </div>
+          <ul class="spec-list">
+            <li>Lightweight review portal — no install required for external reviewers</li>
+            <li>HLS adaptive streaming for proxy delivery from cloud storage</li>
+            <li>Real-time collaboration via WebSockets (comments appear live for all viewers)</li>
+            <li>Secure link generation with expiry, password-protection, and permission tiers</li>
+          </ul>
+        </div>
+
+        <div class="spec-block">
+          <div class="spec-block-header"><span class="spec-num">BACKEND</span><span class="spec-title">Cloud Infrastructure</span></div>
+          <div class="tech-row">
+            <span class="tech-tag">Supabase</span>
+            <span class="tech-tag">Cloudflare R2</span>
+            <span class="tech-tag">WhisperX</span>
+            <span class="tech-tag">PostgreSQL</span>
+            <span class="tech-tag">Redis</span>
+          </div>
+          <ul class="spec-list">
+            <li>Metadata and collaboration sync via Supabase Realtime (PostgreSQL + WebSockets)</li>
+            <li>Proxy storage on Cloudflare R2 (S3-compatible, egress-free) — originals never leave production storage</li>
+            <li>Optional self-hosted deployment for studios with strict data sovereignty requirements</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- PHASES -->
+      <div class="section" id="section-phases">
+        <div class="section-label">Development Roadmap</div>
+        <div class="section-title">Build sequence.</div>
+        <div class="section-intro">Four phases from MVP to full platform. Each phase ships something usable in production — no waiting for a "full" product to test the concept.</div>
+
+        <div class="phase-timeline">
+          <div class="phase-item">
+            <div class="phase-dot">1</div>
+            <div class="phase-content">
+              <div class="phase-label">Phase 1 — 8 weeks</div>
+              <div class="phase-name">Core Ingest + Sync MVP</div>
+              <div class="phase-desc">Desktop app with watch folder ingest, proxy generation, waveform audio sync, and a basic scene/take browser. No AI scoring yet — just getting media organized and synced automatically.</div>
+            </div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-dot">2</div>
+            <div class="phase-content">
+              <div class="phase-label">Phase 2 — 8 weeks</div>
+              <div class="phase-name">AI Scoring + Review</div>
+              <div class="phase-desc">Vision and audio quality analysis. Take scoring with per-dimension breakdowns. Annotation system. Mobile iOS app for review and approval. Shareable web review links.</div>
+            </div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-dot">3</div>
+            <div class="phase-content">
+              <div class="phase-label">Phase 3 — 6 weeks</div>
+              <div class="phase-name">Rough Cut Assembly + Export</div>
+              <div class="phase-desc">Auto-assembly of scene EDLs and documentary subject/theme cuts. FCPXML, EDL, and Resolve XML export. Version history. Transcription and full-text search across all footage.</div>
+            </div>
+          </div>
+          <div class="phase-item">
+            <div class="phase-dot">4</div>
+            <div class="phase-content">
+              <div class="phase-label">Phase 4 — Ongoing</div>
+              <div class="phase-name">Platform & Integrations</div>
+              <div class="phase-desc">Frame.io integration, Airtable production database sync, Shot.io connectivity, custom model fine-tuning on studio-specific content, and enterprise SSO + team management.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FULL PROMPT -->
+      <div class="section" id="section-prompt">
+        <div class="section-label">Build Prompt</div>
+        <div class="section-title">Copy this to start building.</div>
+        <div class="section-intro">The complete product requirements prompt. Use this with your dev team, a no-code builder, or an AI coding agent.</div>
+
+        <div class="prompt-box">
+          <button class="copy-btn" onclick="copyPrompt()">COPY</button>
+          <pre><span class="highlight"># SLATE — AI Dailies Processing & Review Platform</span>
+<span class="highlight-teal">## Product Summary</span>
+Build SLATE, a cross-platform production tool (macOS desktop, iOS mobile, web portal) 
+that automates the dailies processing pipeline for film and television production.
+It handles both scripted narrative and documentary workflows.
+
+<span class="highlight-teal">## Core Principles</span>
+- Never delete or trash media. Bad takes are deprioritized, not removed.
+- All AI decisions are transparent, explainable, and overrideable by humans.
+- Originals are never modified. SLATE works with proxies and metadata only.
+- The system must work offline on set (desktop + mobile).
+
+<span class="highlight-teal">## Key Features</span>
+
+<span class="highlight">### 1. Media Ingest</span>
+- Watch folder monitoring (local drives, SMB/NFS network volumes, S3/GCS cloud storage)
+- Support for ARRIRAW, BRAW, ProRes, R3D, MXF, MP4/H.264
+- Auto-detect scene/slate/take from filenames, XMP metadata, SMPTE timecode
+- GPU-accelerated proxy generation (H.264 1080p with optional LUT bake)
+- Checksum verification on ingest
+- Frame.io API import support
+
+<span class="highlight">### 2. AI Audio Sync</span>
+- Primary: waveform cross-correlation clap detection (handles missed/double slates)
+- Fallback: SMPTE LTC/VITC timecode
+- Multi-track ISO support with auto-channel assignment (boom, lav)
+- Drift correction for long takes
+- Manual drag-sync override in waveform editor
+- Export: FCPXML, AAF, OMF with synced multi-track audio
+
+<span class="highlight">### 3. Take Scoring (AI)</span>
+- Vision: focus, exposure, motion blur, camera shake, lens flare detection
+- Audio: clipping, noise spikes, proximity, missing channels
+- Narrative mode: transcription + flub detection against uploaded script
+- Documentary mode: semantic content scoring, interview intelligibility
+- Composite score 0–100 with per-dimension breakdown shown to user
+- User-configurable scoring weights per project
+- Score reasoning shown inline (e.g. "Focus soft at 0:02 — subject blinked")
+- Filtered views: Best take per setup / Circled takes / All takes (default: top 3)
+
+<span class="highlight">### 4. Rough Cut Assembly</span>
+- Narrative mode: EDL/XML assembled by scene, highest-scored take per setup
+- Documentary mode: assemble by interview subject or user-defined themes/topics
+- Director override: manual take selections replace AI picks in assembly
+- Export: FCPXML, EDL, DaVinci Resolve XML
+- Assembly preview playback within SLATE before export
+- Version history for all assembly exports
+
+<span class="highlight">### 5. Review & Annotation</span>
+- Frame-accurate timestamped comments (text and voice)
+- Circle / X / Flag system (maps to NLE metadata on export)
+- Multi-user presence (see who's watching in real time)
+- Director approval workflow: Pending → Reviewed → Approved
+- Shareable guest review links (time-limited, no login required)
+- Mobile full review, annotation, and approval
+
+<span class="highlight">### 6. Documentary Mode (Additional)</span>
+- Footage organized by subject / shooting day, not scene/slate
+- WhisperX transcription with speaker diarization
+- Full text search across all transcribed footage
+- Clip tagging by topic/theme keywords
+- Assemble rough cut by dragging theme bins into an outline
+- Paper cut export to NLE
+
+<span class="highlight-teal">## Platform Targets</span>
+
+<span class="highlight">Desktop (macOS — Primary):</span>
+- Native Swift/SwiftUI, Apple Silicon optimized
+- All AI models run on-device via Core ML / MLX (no cloud required for AI)
+- GPU-accelerated transcode via VideoToolbox + Metal
+- Background daemon for watch-folder monitoring
+- Menu bar icon with progress and quick access
+
+<span class="highlight">Mobile (iOS/iPadOS — Review):</span>
+- Swift/SwiftUI, AVKit playback
+- Proxy cached locally for offline review on set
+- Push notifications when dailies are ready
+- iPad split-screen: notes + playback side by side
+
+<span class="highlight">Web (Review Portal — Lightweight):</span>
+- Next.js 14 / React
+- HLS adaptive streaming from cloud proxy storage
+- Real-time comments via WebSockets
+- Secure link generation (expiry, password, permission tiers)
+- No install required for external reviewers
+
+<span class="highlight-teal">## Backend</span>
+- Supabase (PostgreSQL + Realtime for collaboration sync)
+- Cloudflare R2 for proxy storage (originals never leave production storage)
+- Optional self-hosted deployment for data-sovereign studios
+- WhisperX for local transcription; hosted Whisper API as cloud fallback
+
+<span class="highlight-teal">## Out of Scope (V1)</span>
+- Editing within SLATE (export to NLE only)
+- Color grading or VFX review
+- Audio mixing or dialogue editing
+- Windows or Android support
+
+<span class="highlight-teal">## Success Metrics</span>
+- Time from card wrap to director review link: under 30 minutes for a 10-hour shoot day
+- Audio sync accuracy: &gt;98% correct on first attempt
+- Take scoring correlation with editor's final picks: &gt;80%
+- Producer/director net promoter score: &gt;60 after first production</pre>
+        </div>
+      </div>
+
+    </div><!-- /content-main -->
+
+    <!-- ASIDE -->
+    <div class="content-aside">
+      <div class="aside-section">
+        <div class="aside-label">Workflow Modes</div>
+        <div class="aside-item"><span class="aside-dot amber"></span><span class="aside-item-text">Scripted Narrative</span></div>
+        <div class="aside-item"><span class="aside-dot teal"></span><span class="aside-item-text">Documentary / Vérité</span></div>
+        <div class="aside-item"><span class="aside-dot red"></span><span class="aside-item-text">Reality / Unscripted</span></div>
+        <div class="aside-item"><span class="aside-dot gray"></span><span class="aside-item-text">Commercial / Short</span></div>
+      </div>
+
+      <div class="aside-section">
+        <div class="aside-label">Platform</div>
+        <div class="aside-item"><span class="aside-dot amber"></span><span class="aside-item-text">macOS Desktop (Primary)</span></div>
+        <div class="aside-item"><span class="aside-dot teal"></span><span class="aside-item-text">iOS / iPadOS</span></div>
+        <div class="aside-item"><span class="aside-dot red"></span><span class="aside-item-text">Web Review Portal</span></div>
+      </div>
+
+      <div class="aside-section">
+        <div class="aside-label">NLE Export</div>
+        <div class="aside-item"><span class="aside-dot amber"></span><span class="aside-item-text">FCPXML (Final Cut)</span></div>
+        <div class="aside-item"><span class="aside-dot teal"></span><span class="aside-item-text">EDL (Avid, Premiere)</span></div>
+        <div class="aside-item"><span class="aside-dot red"></span><span class="aside-item-text">DaVinci Resolve XML</span></div>
+        <div class="aside-item"><span class="aside-dot gray"></span><span class="aside-item-text">AAF / OMF (Audio)</span></div>
+      </div>
+
+      <div class="aside-section">
+        <div class="aside-label">Key Integrations</div>
+        <div class="aside-item"><span class="aside-dot gray"></span><span class="aside-item-text">Frame.io</span></div>
+        <div class="aside-item"><span class="aside-dot gray"></span><span class="aside-item-text">Airtable</span></div>
+        <div class="aside-item"><span class="aside-dot gray"></span><span class="aside-item-text">Slack / Google Workspace</span></div>
+        <div class="aside-item"><span class="aside-dot gray"></span><span class="aside-item-text">S3 / GCS / R2</span></div>
+      </div>
+
+      <div class="aside-section">
+        <div class="aside-label">Open Questions</div>
+        <div class="aside-item"><span class="aside-dot red"></span><span class="aside-item-text">Preferred cloud storage backend?</span></div>
+        <div class="aside-item"><span class="aside-dot red"></span><span class="aside-item-text">NLE plugin integration needed?</span></div>
+        <div class="aside-item"><span class="aside-dot red"></span><span class="aside-item-text">Enterprise SSO / team auth?</span></div>
+        <div class="aside-item"><span class="aside-dot red"></span><span class="aside-item-text">Windows support timeline?</span></div>
+      </div>
+    </div>
+
+  </div><!-- /doc-body -->
+
+</div><!-- /doc-shell -->
+
+<script>
+function showSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('section-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function copyPrompt() {
+  const pre = document.querySelector('.prompt-box pre');
+  const text = pre.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = 'COPIED!';
+    btn.style.color = 'var(--teal)';
+    setTimeout(() => { btn.textContent = 'COPY'; btn.style.color = ''; }, 2000);
+  });
+}
+</script>
+</body>
+</html>

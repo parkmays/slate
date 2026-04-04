@@ -1,0 +1,317 @@
+import Foundation
+import AVFoundation
+import CoreImage
+import Metal
+import MetalKit
+import SLATESharedTypes
+
+// MARK: - ProxyLUT
+
+/// Identifies the viewing LUT applied (or not) during proxy generation.
+/// Values mirror data-model.json `proxyLUT` field.
+public enum ProxyLUT: String, Sendable {
+    case arriLogC3Rec709    = "arri_logc3_rec709"
+    case bmFilmGen5Rec709   = "bm_film_gen5_rec709"
+    case redIPP2Rec709      = "red_ipp2_rec709"
+    case none               = "none"
+
+    /// Human-readable output color space tag written to `proxyColorSpace`.
+    public var proxyColorSpace: String {
+        switch self {
+        case .none: return "log"
+        default:    return "rec709"
+        }
+    }
+}
+
+public struct LUTManager {
+    private static let device = MTLCreateSystemDefaultDevice()!
+    private static let context = CIContext(mtlDevice: device)
+
+    // MARK: - Format → LUT mapping
+
+    /// Returns the appropriate viewing LUT for a given source format.
+    /// ProRes / H.264 / MXF are already Rec.709 — no LUT needed (pass-through).
+    public static func lut(for format: SourceFormat) -> ProxyLUT {
+        switch format {
+        case .arriraw:              return .arriLogC3Rec709
+        case .braw:                 return .bmFilmGen5Rec709
+        case .r3d:                  return .redIPP2Rec709
+        case .proRes422HQ, .h264, .mxf: return .none
+        }
+    }
+
+    // MARK: - Public apply entry point
+
+    /// Applies the correct viewing LUT for `lut` to `sampleBuffer`.
+    /// Returns `nil` on any failure (caller should fall back to the original buffer).
+    /// For `.none` (pass-through formats) returns `nil` — caller keeps the original.
+    public static func applyProxyLUT(to sampleBuffer: CMSampleBuffer, lut: ProxyLUT) -> CMSampleBuffer? {
+        guard lut != .none else { return nil }   // pass-through — no processing needed
+        guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
+
+        let ciImage = CIImage(cvPixelBuffer: imageBuffer)
+
+        // Try a bundled .cube LUT first; fall back to a parametric approximation.
+        let transformed: CIImage
+        if let cubeFilter = buildCubeFilter(lut: lut, input: ciImage) {
+            transformed = cubeFilter
+        } else {
+            transformed = parametricRec709Approximation(for: lut, input: ciImage)
+        }
+
+        guard let outputPixelBuffer = createPixelBuffer(from: imageBuffer) else { return nil }
+
+        let rec709 = CGColorSpace(name: CGColorSpace.itur_709)
+        context.render(transformed,
+                       to: outputPixelBuffer,
+                       commandBuffer: nil,
+                       bounds: CGRect(x: 0, y: 0,
+                                      width: CVPixelBufferGetWidth(imageBuffer),
+                                      height: CVPixelBufferGetHeight(imageBuffer)),
+                       colorSpace: rec709)
+
+        return rebuildSampleBuffer(from: outputPixelBuffer, timing: sampleBuffer)
+    }
+
+    // MARK: - Legacy pass-through (kept for backward compatibility — unused internally)
+
+    public static func applyProxyLUT(to sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+        return nil   // callers should switch to applyProxyLUT(to:lut:)
+    }
+
+    // MARK: - Private helpers
+
+    /// Loads a 3D .cube LUT from the app bundle and wraps it in a CIColorCubeWithColorSpace filter.
+    private static func buildCubeFilter(lut: ProxyLUT, input: CIImage) -> CIImage? {
+        let resourceName: String
+        switch lut {
+        case .arriLogC3Rec709:  resourceName = "arri_logc3_to_rec709"
+        case .bmFilmGen5Rec709: resourceName = "bm_film_gen5_to_rec709"
+        case .redIPP2Rec709:    resourceName = "red_ipp2_to_rec709"
+        case .none:             return nil
+        }
+
+        // Search bundle resources; ingest daemon is a standalone process so we
+        // look in its bundle first, then the main app bundle as a fallback.
+        let searchBundles: [Bundle] = [Bundle.main, Bundle(for: LUTManagerClass.self)]
+        guard let cubeURL = searchBundles.lazy.compactMap({
+            $0.url(forResource: resourceName, withExtension: "cube")
+        }).first else {
+            return nil   // .cube file not shipped yet — fall back to parametric
+        }
+
+        guard let cubeData = try? Data(contentsOf: cubeURL),
+              let (lutData, dimension) = parseCUBEData(cubeData) else {
+            return nil
+        }
+
+        let rec709 = CGColorSpace(name: CGColorSpace.itur_709)!
+        return input.applyingFilter("CIColorCubeWithColorSpace", parameters: [
+            "inputCubeDimension": dimension,
+            "inputCubeData":      lutData as NSData,
+            "inputColorSpace":    rec709
+        ])
+    }
+
+    /// Parametric Rec.709 approximation used when the .cube file is absent.
+    /// Good enough for monitoring; replaced by the real LUT once files ship.
+    private static func parametricRec709Approximation(for lut: ProxyLUT, input: CIImage) -> CIImage {
+        // Each log format has a different "gamma lift" to get to Rec.709-ish appearance.
+        let gamma: Float
+        switch lut {
+        case .arriLogC3Rec709:  gamma = 1.0 / 2.2   // LogC3 is relatively mild
+        case .bmFilmGen5Rec709: gamma = 1.0 / 2.6   // BM Film Gen 5 is very flat
+        case .redIPP2Rec709:    gamma = 1.0 / 2.4   // IPP2 mid-point
+        case .none:             gamma = 1.0
+        }
+        return input.applyingFilter("CIGammaAdjust", parameters: [
+            kCIInputPowerKey: gamma
+        ])
+    }
+
+    /// Parses a .cube file and returns (flatRGBAData, cubeDimension) suitable for CIColorCube.
+    private static func parseCUBEData(_ data: Data) -> (Data, Int)? {
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        var dimension = 33
+        var floats: [Float] = []
+
+        for line in text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("#") || trimmed.isEmpty { continue }
+            if trimmed.hasPrefix("LUT_3D_SIZE") {
+                let parts = trimmed.split(separator: " ")
+                if parts.count >= 2, let d = Int(parts[1]) { dimension = d }
+                continue
+            }
+            if trimmed.hasPrefix("TITLE") || trimmed.hasPrefix("DOMAIN") { continue }
+            let parts = trimmed.split(separator: " ")
+            if parts.count >= 3,
+               let r = Float(parts[0]), let g = Float(parts[1]), let b = Float(parts[2]) {
+                floats.append(r); floats.append(g); floats.append(b); floats.append(1.0)
+            }
+        }
+
+        guard !floats.isEmpty else { return nil }
+        let rawData = floats.withUnsafeBufferPointer { Data(buffer: $0) }
+        return (rawData, dimension)
+    }
+
+    /// Wraps a CVPixelBuffer back into a CMSampleBuffer, copying timing from `source`.
+    private static func rebuildSampleBuffer(
+        from pixelBuffer: CVPixelBuffer,
+        timing source: CMSampleBuffer
+    ) -> CMSampleBuffer? {
+        var timingInfo = CMSampleTimingInfo()
+        guard CMSampleBufferGetSampleTimingInfo(source, at: 0, timingInfoOut: &timingInfo) == noErr else {
+            return nil
+        }
+        var formatDesc: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
+                                                     imageBuffer: pixelBuffer,
+                                                     formatDescriptionOut: &formatDesc)
+        guard let desc = formatDesc else { return nil }
+        var newBuffer: CMSampleBuffer?
+        CMSampleBufferCreateWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            dataReady: true,
+            makeDataReadyCallback: nil,
+            refcon: nil,
+            formatDescription: desc,
+            sampleTiming: &timingInfo,
+            sampleBufferOut: &newBuffer
+        )
+        return newBuffer
+    }
+    
+    private static func createPixelBuffer(from original: CVPixelBuffer) -> CVPixelBuffer? {
+        let width = CVPixelBufferGetWidth(original)
+        let height = CVPixelBufferGetHeight(original)
+        let pixelFormatType = CVPixelBufferGetPixelFormatType(original)
+        
+        var attributes: [String: Any] = [
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+            kCVPixelBufferWidthKey as String: width,
+            kCVPixelBufferHeightKey as String: height,
+            kCVPixelBufferPixelFormatTypeKey as String: pixelFormatType,
+            kCVPixelBufferMetalCompatibilityKey as String: true
+        ]
+        
+        if let planeCount = CVPixelBufferGetPlaneCount(original) as Int?, planeCount > 1 {
+            // For planar formats (like 420v/420f)
+            var pixelBuffer: CVPixelBuffer?
+            CVPixelBufferCreate(
+                kCFAllocatorDefault,
+                width,
+                height,
+                pixelFormatType,
+                attributes as CFDictionary,
+                &pixelBuffer
+            )
+            return pixelBuffer
+        } else {
+            // For interleaved formats
+            var pixelBuffer: CVPixelBuffer?
+            CVPixelBufferCreate(
+                kCFAllocatorDefault,
+                width,
+                height,
+                pixelFormatType,
+                attributes as CFDictionary,
+                &pixelBuffer
+            )
+            return pixelBuffer
+        }
+    }
+}
+
+// Bundle anchor — gives Bundle(for:) a class to find the ingest daemon's bundle.
+private final class LUTManagerClass: NSObject {}
+
+// MARK: - Custom LUT Support
+
+public struct CustomLUT {
+    public let name: String
+    public let data: Data
+    public let inputColorSpace: String
+    public let outputColorSpace: String
+    
+    public init(name: String, data: Data, inputColorSpace: String, outputColorSpace: String) {
+        self.name = name
+        self.data = data
+        self.inputColorSpace = inputColorSpace
+        self.outputColorSpace = outputColorSpace
+    }
+}
+
+public extension LUTManager {
+    static func loadCustomLUTs() -> [CustomLUT] {
+        var luts: [CustomLUT] = []
+        
+        // Built-in LUTs directory
+        let lutsDirectory = Bundle.main.bundleURL.appendingPathComponent("Resources/LUTs")
+        
+        // User LUTs directory
+        let userLutsDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?
+            .appendingPathComponent("SLATE/LUTs")
+        
+        let directories = [lutsDirectory, userLutsDirectory].compactMap { $0 }
+        
+        for directory in directories {
+            guard FileManager.default.fileExists(atPath: directory.path) else { continue }
+            
+            do {
+                let lutFiles = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                
+                for fileURL in lutFiles where fileURL.pathExtension.lowercased() == "cube" {
+                    do {
+                        let data = try Data(contentsOf: fileURL)
+                        let lut = parseCUBELUT(data: data, filename: fileURL.lastPathComponent)
+                        luts.append(lut)
+                    } catch {
+                        print("Failed to load LUT from \(fileURL.lastPathComponent): \(error)")
+                    }
+                }
+            } catch {
+                print("Failed to enumerate LUTs in \(directory): \(error)")
+            }
+        }
+        
+        return luts
+    }
+    
+    private static func parseCUBELUT(data: Data, filename: String) -> CustomLUT {
+        // Simple .cube LUT parser
+        let string = String(data: data, encoding: .utf8) ?? ""
+        let lines = string.components(separatedBy: .newlines)
+        
+        var title = filename
+        var inputColorSpace = "Rec.709"
+        var outputColorSpace = "Rec.709"
+        
+        for line in lines {
+            if line.hasPrefix("TITLE ") {
+                title = String(line.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if line.contains("INPUT_COLOR_SPACE") {
+                inputColorSpace = extractValue(from: line)
+            } else if line.contains("OUTPUT_COLOR_SPACE") {
+                outputColorSpace = extractValue(from: line)
+            }
+        }
+        
+        return CustomLUT(
+            name: title,
+            data: data,
+            inputColorSpace: inputColorSpace,
+            outputColorSpace: outputColorSpace
+        )
+    }
+    
+    private static func extractValue(from line: String) -> String {
+        let components = line.components(separatedBy: " ")
+        return components.last ?? ""
+    }
+}

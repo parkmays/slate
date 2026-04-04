@@ -1,0 +1,35 @@
+.DS_Store
+
+# Swift Package Manager
+.build/
+**/DerivedData/
+packages/*/.build/
+node_modules/
+packages/shared-types/node_modules/
+
+benchmark-results.json
+
+# Xcode / SwiftPM user state
+.swiftpm/
+
+# Shipping / local artifacts
+dist/
+.archives/
+*.xcarchive
+*.dmg
+
+# Coverage / CI
+coverage-report/
+coverage.profdata
+coverage-merged.profdata
+*.profdata
+
+# Local agent / IDE state (may contain nested git repos)
+.claude/worktrees/
+
+# Next.js / web
+**/.next/
+**/node_modules/
+
+# Xcode user data
+**/xcuserdata/

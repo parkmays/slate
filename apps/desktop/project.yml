@@ -1,0 +1,116 @@
+name: SLATE
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.0"
+configs:
+  Debug: debug
+  Release: release
+packages:
+  SharedTypes:
+    path: ../../packages/shared-types
+  IngestDaemon:
+    path: ../../packages/ingest-daemon
+  ExportWriters:
+    path: ../../packages/export-writers
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: 6.0.0
+  Supabase:
+    url: https://github.com/supabase-community/supabase-swift
+    from: 2.0.0
+settings:
+  base:
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 0.1.0
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_VERSION: 5.0
+targets:
+  SLATECore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/SLATECore
+    dependencies:
+      - package: SharedTypes
+        product: SLATESharedTypes
+      - package: IngestDaemon
+        product: IngestDaemon
+      - package: ExportWriters
+        product: ExportWriters
+      - package: GRDB
+        product: GRDB
+      - package: Supabase
+        product: Supabase
+    settings:
+      base:
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.mountaintop.slate.core
+        PRODUCT_NAME: SLATECore
+        OTHER_SWIFT_FLAGS:
+          - "$(inherited)"
+          - "-enable-experimental-feature"
+          - "StrictConcurrency"
+        SKIP_INSTALL: YES
+
+  SLATEUI:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/SLATEUI
+    dependencies:
+      - target: SLATECore
+      - package: ExportWriters
+        product: ExportWriters
+      - package: SharedTypes
+        product: SLATESharedTypes
+    settings:
+      base:
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.mountaintop.slate.ui
+        PRODUCT_NAME: SLATEUI
+        OTHER_SWIFT_FLAGS:
+          - "$(inherited)"
+          - "-enable-experimental-feature"
+          - "StrictConcurrency"
+        SKIP_INSTALL: YES
+
+  SLATE:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/SLATEDesktop
+    dependencies:
+      - target: SLATECore
+      - target: SLATEUI
+      - package: SharedTypes
+        product: SLATESharedTypes
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+        PRODUCT_BUNDLE_IDENTIFIER: com.mountaintop.slate
+        PRODUCT_NAME: SLATE
+
+  SLATEDesktopTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/SLATEDesktopTests
+    dependencies:
+      - target: SLATE
+      - target: SLATECore
+      - target: SLATEUI
+      - package: ExportWriters
+        product: ExportWriters
+      - package: SharedTypes
+        product: SLATESharedTypes
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.mountaintop.slate.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SLATE.app/Contents/MacOS/SLATE"

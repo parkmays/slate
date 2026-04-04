@@ -1,0 +1,71 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { reviewAccessCookieName } from '@/lib/review-auth'
+import { createServerSupabaseClient } from '@/lib/supabase'
+import {
+  ReviewRouteError,
+  requireClipAccess,
+  requireShareLinkAccess,
+} from '@/lib/review-server'
+
+function edgeBaseUrl(): string | null {
+  return process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? null
+}
+
+function anonKey(): string | null {
+  return process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? null
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { clipId } = await request.json()
+    const shareToken = request.headers.get('X-Share-Token')
+    const baseUrl = edgeBaseUrl()
+    const bearer = anonKey()
+
+    if (!clipId) {
+      return NextResponse.json({ error: 'Missing clipId' }, { status: 400 })
+    }
+    if (!shareToken) {
+      return NextResponse.json({ error: 'Missing share token' }, { status: 401 })
+    }
+    if (!baseUrl || !bearer) {
+      return NextResponse.json({ error: 'Supabase environment is not configured' }, { status: 500 })
+    }
+
+    const supabase = createServerSupabaseClient()
+    const shareLink = await requireShareLinkAccess(supabase, shareToken, request)
+    await requireClipAccess(supabase, clipId, shareLink)
+    const reviewAccess = request.cookies.get(reviewAccessCookieName(shareToken))?.value
+
+    const response = await fetch(`${baseUrl}/functions/v1/sign-proxy-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Share-Token': shareToken,
+        ...(reviewAccess ? { 'X-Review-Access': reviewAccess } : {}),
+        Authorization: `Bearer ${bearer}`,
+      },
+      body: JSON.stringify({ clipId }),
+      cache: 'no-store',
+    })
+
+    const raw = await response.text()
+    const payload = raw ? JSON.parse(raw) : {}
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: payload.error ?? 'Failed to get proxy URL' },
+        { status: response.status }
+      )
+    }
+
+    return NextResponse.json(payload)
+  } catch (error) {
+    if (error instanceof ReviewRouteError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
+
+    console.error('Proxy URL error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}

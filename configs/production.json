@@ -1,0 +1,108 @@
+{
+  "environment": "production",
+  "version": "1.2.0",
+  "syncEngine": {
+    "confidenceThresholds": {
+      "high": 0.95,
+      "medium": 0.8,
+      "low": 0.6,
+      "maxDriftHighPPM": 3.0,
+      "maxDriftMediumPPM": 15.0,
+      "maxOffsetHighFrames": 0,
+      "maxOffsetMediumFrames": 1
+    },
+    "performance": {
+      "fftThresholdBytes": 1000000,
+      "fftThresholdSamples": 50,
+      "maxConcurrentOperations": 8,
+      "streamingMemoryLimit": 50000000,
+      "streamingChunkSize": 96000,
+      "enableGPUAcceleration": true
+    },
+    "audio": {
+      "defaultSampleRate": 48000,
+      "correlationSampleRate": 16000,
+      "antiAliasFilterLength": 128,
+      "antiAliasCutoffRatio": 0.95,
+      "minDurationSeconds": 0.5,
+      "roleClassificationDuration": 60.0
+    },
+    "limits": {
+      "maxInMemoryFileSize": 50000000,
+      "maxDurationSeconds": 7200,
+      "syncTimeoutSeconds": 60,
+      "aiTimeoutSeconds": 180
+    }
+  },
+  "aiPipeline": {
+    "vision": {
+      "sampleFPS": 4,
+      "useCoreML": true,
+      "useOptimized": true,
+      "adaptiveSamplingThreshold": 180,
+      "metal": {
+        "enabled": true,
+        "maxThreadsPerGroup": 512,
+        "threadgroupMemorySize": 32768
+      }
+    },
+    "audio": {
+      "silenceThreshold": 0.005,
+      "clippingThreshold": 0.98,
+      "noiseFloorThreshold": 0.0005
+    },
+    "transcription": {
+      "model": "small",
+      "language": "",
+      "enableTimestamps": true,
+      "minWordConfidence": 0.7
+    },
+    "performance": {
+      "contentDensityWeight": 0.6,
+      "performanceWeight": 0.4
+    },
+    "models": {
+      "degradation": {
+        "maxConsecutiveFailures": 2,
+        "cooldownPeriod": 180,
+        "performanceThreshold": 30,
+        "confidenceThreshold": 0.4
+      },
+      "confidenceTracking": {
+        "maxHistorySize": 2000,
+        "enableTrendAnalysis": true,
+        "trendWindowSize": 20
+      },
+      "caching": {
+        "enabled": true,
+        "maxSize": 5000,
+        "ttl": 7200,
+        "includeChecksum": true
+      }
+    }
+  },
+  "logging": {
+    "level": "info",
+    "structured": true,
+    "filePath": "/var/log/slate/engine.log",
+    "maxFileSize": 50000000,
+    "maxFiles": 10,
+    "enableMetrics": true
+  },
+  "monitoring": {
+    "healthCheckInterval": 30,
+    "metricsExportInterval": 60,
+    "alertThresholds": {
+      "errorRate": 0.05,
+      "averageLatency": 45,
+      "memoryUsage": 0.8,
+      "cpuUsage": 0.9
+    }
+  },
+  "resources": {
+    "maxConcurrentClips": 16,
+    "tempDirectory": "/tmp/slate",
+    "cacheDirectory": "/var/cache/slate",
+    "modelDirectory": "/opt/slate/models"
+  }
+}

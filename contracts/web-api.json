@@ -1,0 +1,119 @@
+{
+  "version": "1.1",
+  "author": "gemini-code-assist",
+  "description": "REST and Edge Function endpoints for desktop app and Codex to consume",
+  "edgeFunctions": {
+    "generateShareLink": {
+      "url": "https://{project}.supabase.co/functions/v1/generate-share-link",
+      "method": "POST",
+      "auth": "Bearer {supabase_jwt}",
+      "body": {
+        "projectId": "string (UUID)",
+        "scope": "project|scene|subject|assembly",
+        "scopeId": "string|null",
+        "expiryHours": "number (default: 168)",
+        "password": "string|null",
+        "permissions": {
+          "canComment": "boolean",
+          "canFlag": "boolean",
+          "canRequestAlternate": "boolean"
+        }
+      },
+      "response": {
+        "token": "string",
+        "url": "string (https://slate.app/review/{token})",
+        "expiresAt": "string (ISO 8601)"
+      }
+    },
+    "signProxyUrl": {
+      "url": "https://{project}.supabase.co/functions/v1/sign-proxy-url",
+      "method": "POST",
+      "auth": "Bearer {supabase_jwt} OR X-Share-Token: {token}",
+      "body": { "clipId": "string (UUID)" },
+      "response": {
+        "signedUrl": "string (Cloudflare R2 presigned URL)",
+        "thumbnailUrl": "string (Cloudflare R2 presigned URL)",
+        "expiresAt": "string (ISO 8601, 24h from now)"
+      }
+    },
+    "syncAnnotation": {
+      "url": "https://{project}.supabase.co/functions/v1/sync-annotation",
+      "method": "POST",
+      "auth": "Bearer {supabase_jwt} OR X-Share-Token: {token}",
+      "body": {
+        "clipId": "string (UUID)",
+        "timecode": "string (SMPTE)",
+        "type": "note|flag|bookmark|question|action",
+        "content": "string",
+        "isPrivate": "boolean (default: false)",
+        "authorName": "string (optional for share links)"
+      },
+      "response": {
+        "id": "string (UUID)",
+        "clipId": "string (UUID)",
+        "timecode": "string (SMPTE)",
+        "type": "string",
+        "content": "string",
+        "authorName": "string",
+        "timestamp": "string (ISO 8601)",
+        "isPrivate": "boolean"
+      }
+    }
+  },
+  "restApi": {
+    "base": "https://{project}.supabase.co/rest/v1",
+    "auth": "Bearer {supabase_jwt}",
+    "endpoints": {
+      "projects": {
+        "list": "GET /projects?select=*&order=created_at.desc",
+        "get": "GET /projects?id=eq.{id}",
+        "create": "POST /projects",
+        "update": "PATCH /projects?id=eq.{id}"
+      },
+      "clips": {
+        "list": "GET /clips?project_id=eq.{projectId}&order=created_at.asc",
+        "get": "GET /clips?id=eq.{id}",
+        "create": "POST /clips",
+        "update": "PATCH /clips?id=eq.{id}",
+        "updateStatus": "PATCH /clips?id=eq.{id}",
+        "bulkUpdate": "POST /rpc/bulk_update_clips"
+      },
+      "annotations": {
+        "list": "GET /annotations?clip_id=eq.{clipId}&order=timecode_seconds.asc",
+        "get": "GET /annotations?id=eq.{id}",
+        "create": "POST /annotations",
+        "update": "PATCH /annotations?id=eq.{id}",
+        "delete": "DELETE /annotations?id=eq.{id}",
+        "replies": {
+          "list": "GET /annotation_replies?annotation_id=eq.{annotationId}",
+          "create": "POST /annotation_replies"
+        }
+      },
+      "assemblies": {
+        "list": "GET /assemblies?project_id=eq.{projectId}&order=created_at.desc",
+        "get": "GET /assemblies?id=eq.{id}",
+        "create": "POST /assemblies",
+        "update": "PATCH /assemblies?id=eq.{id}",
+        "clips": "GET /assembly_clips?assembly_id=eq.{assemblyId}&order=order.asc"
+      },
+      "shareLinks": {
+        "list": "GET /share_links?project_id=eq.{projectId}&order=created_at.desc",
+        "get": "GET /share_links?token=eq.{token}",
+        "revoke": "PATCH /share_links?id=eq.{id}&expires_at=now()",
+        "updateViewCount": "PATCH /share_links?id=eq.{id}"
+      }
+    }
+  },
+  "webhooks": {
+    "clipProcessed": {
+      "url": "https://api.slate.app/webhooks/clip-processed",
+      "events": ["proxy.completed", "sync.completed", "transcription.completed"],
+      "auth": "Bearer {webhook_secret}"
+    },
+    "annotationCreated": {
+      "url": "https://api.slate.app/webhooks/annotation-created",
+      "events": ["annotation.inserted"],
+      "auth": "Bearer {webhook_secret}"
+    }
+  }
+}

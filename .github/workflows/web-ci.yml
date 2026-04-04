@@ -1,0 +1,140 @@
+name: Web CI
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/web/**']
+  pull_request:
+    branches: [main]
+    paths: ['apps/web/**']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
+          
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+        
+      - name: Type check
+        working-directory: apps/web
+        run: npm run type-check
+        
+      - name: Lint
+        working-directory: apps/web
+        run: npm run lint
+        
+      - name: Unit tests
+        working-directory: apps/web
+        run: npm run test
+        
+      - name: Build
+        working-directory: apps/web
+        run: npm run build
+          
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-files
+          path: apps/web/.next
+          
+  e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
+          
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+        
+      - name: Install Playwright
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+          
+      - name: Run Playwright tests
+        working-directory: apps/web
+        run: npm run test:e2e
+          
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          
+  lighthouse:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
+          
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+        
+      - name: Build
+        working-directory: apps/web
+        run: npm run build
+          
+      - name: Start server
+        working-directory: apps/web
+        run: npm start &
+          
+      - name: Wait for server
+        run: sleep 10
+        
+      - name: Run Lighthouse CI
+        working-directory: apps/web
+        run: |
+          npm install -g @lhci/cli@0.12.x
+          lhci autorun
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+          
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [test, e2e]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          working-directory: apps/web
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          scope: ${{ secrets.VERCEL_ORG_ID }}

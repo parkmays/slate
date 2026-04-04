@@ -1,0 +1,90 @@
+{
+  "syncEngine": {
+    "confidenceThresholds": {
+      "high": 0.9,
+      "medium": 0.7,
+      "low": 0.5,
+      "maxDriftHighPPM": 5.0,
+      "maxDriftMediumPPM": 20.0,
+      "maxOffsetHighFrames": 0,
+      "maxOffsetMediumFrames": 2
+    },
+    "performance": {
+      "fftThresholdBytes": 2000000,
+      "fftThresholdSamples": 100,
+      "maxConcurrentOperations": 4,
+      "streamingMemoryLimit": 10000000,
+      "streamingChunkSize": 48000,
+      "enableGPUAcceleration": true
+    },
+    "audio": {
+      "defaultSampleRate": 48000,
+      "correlationSampleRate": 8000,
+      "antiAliasFilterLength": 64,
+      "antiAliasCutoffRatio": 0.9,
+      "minDurationSeconds": 1.0,
+      "roleClassificationDuration": 30.0
+    },
+    "limits": {
+      "maxInMemoryFileSize": 100000000,
+      "maxDurationSeconds": 3600,
+      "syncTimeoutSeconds": 120,
+      "aiTimeoutSeconds": 300
+    }
+  },
+  "aiPipeline": {
+    "vision": {
+      "sampleFPS": 2,
+      "useCoreML": true,
+      "useOptimized": true,
+      "adaptiveSamplingThreshold": 300,
+      "metal": {
+        "enabled": true,
+        "maxThreadsPerGroup": 256,
+        "threadgroupMemorySize": 16384
+      }
+    },
+    "audio": {
+      "silenceThreshold": 0.01,
+      "clippingThreshold": 0.95,
+      "noiseFloorThreshold": 0.001
+    },
+    "transcription": {
+      "model": "base",
+      "language": "",
+      "enableTimestamps": true,
+      "minWordConfidence": 0.5
+    },
+    "performance": {
+      "contentDensityWeight": 0.5,
+      "performanceWeight": 0.5
+    },
+    "models": {
+      "degradation": {
+        "maxConsecutiveFailures": 3,
+        "cooldownPeriod": 300,
+        "performanceThreshold": 60,
+        "confidenceThreshold": 0.3
+      },
+      "confidenceTracking": {
+        "maxHistorySize": 1000,
+        "enableTrendAnalysis": true,
+        "trendWindowSize": 10
+      },
+      "caching": {
+        "enabled": true,
+        "maxSize": 1000,
+        "ttl": 3600,
+        "includeChecksum": true
+      }
+    }
+  },
+  "logging": {
+    "level": "info",
+    "structured": true,
+    "filePath": "",
+    "maxFileSize": 10000000,
+    "maxFiles": 5,
+    "enableMetrics": true
+  }
+}

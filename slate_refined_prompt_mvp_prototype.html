@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SLATE — Refined Prompt, MVP Scope & Desktop Prototype</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg0:#f0ede8;
+  --bg1:#f8f6f2;
+  --bg2:#ffffff;
+  --t1:#1a1a18;
+  --t2:#5a5955;
+  --t3:#9a9890;
+  --border:rgba(0,0,0,0.08);
+  --border2:rgba(0,0,0,0.14);
+  --amber:#BA7517;
+  --amber-bg:rgba(186,117,23,0.10);
+  --teal:#0F6E56;
+  --teal-bg:rgba(15,110,86,0.10);
+  --info-bg:#e8f0fb;
+  --info-t:#1a4a8a;
+  --warn-bg:#fdf3dc;
+  --warn-t:#7a4d00;
+  --success-bg:#e3f5ec;
+  --success-t:#145a30;
+  --danger-bg:#fde8e8;
+  --danger-t:#8a1a1a;
+  --r-md:8px;
+  --r-lg:12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root{
+    --bg0:#0d1117;
+    --bg1:#161b22;
+    --bg2:#1e2530;
+    --t1:#e6edf3;
+    --t2:#8b949e;
+    --t3:#484f58;
+    --border:rgba(255,255,255,0.06);
+    --border2:rgba(255,255,255,0.12);
+    --info-bg:rgba(26,74,138,0.18);
+    --info-t:#79adf2;
+    --warn-bg:rgba(122,77,0,0.18);
+    --warn-t:#f0c060;
+    --success-bg:rgba(20,90,48,0.18);
+    --success-t:#5fcf8a;
+    --danger-bg:rgba(138,26,26,0.18);
+    --danger-t:#f07070;
+  }
+}
+
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  font-size:14px;
+  line-height:1.6;
+  color:var(--t1);
+  background:var(--bg0);
+  padding:24px;
+  min-height:100vh;
+}
+
+.shell{
+  border:0.5px solid var(--border2);
+  border-radius:var(--r-lg);
+  overflow:hidden;
+  max-width:1100px;
+  margin:0 auto;
+  background:var(--bg2);
+}
+
+.shell-tabs{
+  display:flex;
+  background:var(--bg1);
+  border-bottom:0.5px solid var(--border2);
+}
+.shell-tab{
+  padding:10px 20px;
+  font-size:12px;
+  font-weight:500;
+  color:var(--t2);
+  border:none;
+  background:none;
+  cursor:pointer;
+  border-bottom:2px solid transparent;
+  transition:color .15s,border-color .15s;
+}
+.shell-tab.on{color:var(--t1);border-bottom-color:var(--amber)}
+.shell-body{background:var(--bg2)}
+.panel{display:none;padding:28px}
+.panel.on{display:block}
+
+h2{font-size:18px;font-weight:500;margin-bottom:6px}
+h3{font-size:15px;font-weight:500;margin:20px 0 8px}
+.lead{
+  font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:20px;
+  padding-left:12px;border-left:2px solid var(--amber);
+}
+.note{
+  font-size:12px;color:var(--t2);background:var(--bg1);
+  border:0.5px solid var(--border);border-radius:var(--r-md);
+  padding:10px 14px;margin-bottom:16px;
+}
+.note strong{color:var(--t1);font-weight:500}
+
+.tag{display:inline-block;font-size:11px;font-weight:500;padding:2px 8px;border-radius:20px;margin-right:4px;margin-bottom:4px}
+.tag.a{background:var(--amber-bg);color:var(--amber)}
+.tag.tl{background:var(--teal-bg);color:var(--teal)}
+.tag.i{background:var(--info-bg);color:var(--info-t)}
+.tag.w{background:var(--warn-bg);color:var(--warn-t)}
+.tag.s{background:var(--success-bg);color:var(--success-t)}
+.tag.d{background:var(--danger-bg);color:var(--danger-t)}
+
+.spec-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+@media(max-width:640px){.spec-grid{grid-template-columns:1fr}}
+.spec-card{background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r-md);padding:14px}
+.spec-card h4{font-size:12px;font-weight:500;color:var(--t1);margin-bottom:8px}
+.spec-card ul{list-style:none;display:flex;flex-direction:column;gap:4px}
+.spec-card li{font-size:12px;color:var(--t2);padding-left:12px;position:relative}
+.spec-card li::before{content:'—';position:absolute;left:0;color:var(--border2)}
+.badge{font-family:monospace;font-size:10px;padding:2px 6px;border-radius:4px;margin-right:6px;background:var(--bg0);color:var(--t3)}
+
+.decision-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+@media(max-width:640px){.decision-grid{grid-template-columns:1fr}}
+.decision-card{border:0.5px solid var(--border);border-radius:var(--r-md);overflow:hidden}
+.dc-head{padding:10px 14px;font-size:12px;font-weight:500}
+.dc-head.n{background:var(--info-bg);color:var(--info-t)}
+.dc-head.d{background:var(--teal-bg);color:var(--teal)}
+.dc-body{padding:12px 14px;background:var(--bg1)}
+.dc-body p{font-size:12px;color:var(--t2);margin-bottom:8px;line-height:1.5}
+.dc-body ul{list-style:none;display:flex;flex-direction:column;gap:3px}
+.dc-body li{font-size:12px;color:var(--t2);padding-left:12px;position:relative}
+.dc-body li::before{content:'·';position:absolute;left:2px;color:var(--t3)}
+
+.scope-table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:20px}
+.scope-table th{text-align:left;padding:8px 10px;font-weight:500;font-size:11px;color:var(--t2);border-bottom:0.5px solid var(--border2);background:var(--bg1)}
+.scope-table td{padding:8px 10px;border-bottom:0.5px solid var(--border);vertical-align:top}
+.scope-table tr:last-child td{border-bottom:none}
+.scope-table .week{font-family:monospace;font-size:11px;color:var(--t3);white-space:nowrap}
+.scope-table .feature-name{font-weight:500;color:var(--t1)}
+.scope-table .feature-desc{color:var(--t2);margin-top:2px}
+.effort-bar{height:6px;border-radius:3px;background:var(--border);margin-top:6px;overflow:hidden}
+.effort-fill{height:100%;border-radius:3px;background:var(--amber)}
+
+/* ── PROTOTYPE ── */
+.proto-shell{border:0.5px solid var(--border2);border-radius:var(--r-lg);overflow:hidden;background:var(--bg0)}
+.proto-topbar{display:flex;align-items:center;gap:0;background:var(--bg1);border-bottom:0.5px solid var(--border);height:40px;padding:0 12px}
+.proto-logo{font-weight:500;font-size:13px;letter-spacing:0.05em;color:var(--t1);margin-right:20px}
+.proto-logo span{color:var(--amber)}
+.proto-mode-toggle{display:flex;gap:0;border:0.5px solid var(--border2);border-radius:6px;overflow:hidden;margin-right:auto}
+.proto-mode-btn{padding:4px 12px;font-size:11px;font-weight:500;background:none;border:none;cursor:pointer;color:var(--t2);transition:all .15s}
+.proto-mode-btn.on{background:var(--amber-bg);color:var(--amber)}
+.proto-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2)}
+.status-dot{width:6px;height:6px;border-radius:50%}
+.status-dot.green{background:#1D9E75}
+.status-dot.amber{background:#BA7517}
+
+.proto-main{display:grid;grid-template-columns:200px 1fr 260px;height:560px}
+
+.proto-sidebar{background:var(--bg1);border-right:0.5px solid var(--border);overflow-y:auto;padding:12px 0}
+.sidebar-section{margin-bottom:8px}
+.sidebar-label{padding:4px 14px;font-size:10px;font-weight:500;color:var(--t3);letter-spacing:0.08em;text-transform:uppercase}
+.scene-item{padding:6px 14px;cursor:pointer;transition:background .1s}
+.scene-item:hover,.scene-item.on{background:var(--bg0)}
+.scene-item.on .si-name{color:var(--t1);font-weight:500}
+.si-name{font-size:12px;color:var(--t2)}
+.si-meta{font-size:11px;color:var(--t3);margin-top:1px}
+.si-bar{height:2px;border-radius:1px;margin-top:4px;background:var(--border)}
+.si-fill{height:100%;border-radius:1px}
+
+.mode-panel{display:none;flex-direction:column;flex:1;overflow:hidden}
+.mode-panel.on{display:flex}
+
+.center-header{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:0.5px solid var(--border);background:var(--bg1)}
+.center-title{font-size:13px;font-weight:500;color:var(--t1)}
+.center-meta{font-size:11px;color:var(--t3)}
+.view-tabs{display:flex;gap:0;margin-left:auto}
+.view-tab{padding:4px 10px;font-size:11px;background:none;border:0.5px solid var(--border);cursor:pointer;color:var(--t2)}
+.view-tab:first-child{border-radius:4px 0 0 4px}
+.view-tab:last-child{border-radius:0 4px 4px 0;border-left:none}
+.view-tab.on{background:var(--bg0);color:var(--t1)}
+
+.takes-grid{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.take-row{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r-md);overflow:hidden;cursor:pointer;transition:border-color .15s}
+.take-row:hover{border-color:var(--border2)}
+.take-row.selected{border-color:var(--amber)}
+.take-top{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.take-thumb{width:80px;height:46px;border-radius:4px;background:var(--bg0);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--t3);position:relative;overflow:hidden}
+.take-thumb-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:var(--border)}
+.take-thumb-prog{height:100%;border-radius:0}
+.take-info{flex:1;min-width:0}
+.take-label{font-size:12px;font-weight:500;color:var(--t1)}
+.take-sub{font-size:11px;color:var(--t2);margin-top:2px}
+.take-scores{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.score-pill{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:500}
+.take-score-main{display:flex;flex-direction:column;align-items:center;gap:1px;flex-shrink:0}
+.score-num{font-size:18px;font-weight:500;line-height:1}
+.score-lbl{font-size:10px;color:var(--t3)}
+.take-waveform{height:24px;padding:0 12px 8px;display:flex;align-items:center;gap:1px}
+.wf-bar{flex:1;background:var(--border2);border-radius:1px;transition:background .15s}
+.take-row.selected .wf-bar{background:var(--amber)}
+
+.proto-inspector{background:var(--bg1);border-left:0.5px solid var(--border);overflow-y:auto}
+.insp-header{padding:12px 14px;border-bottom:0.5px solid var(--border)}
+.insp-title{font-size:12px;font-weight:500;color:var(--t1)}
+.insp-sub{font-size:11px;color:var(--t3);margin-top:2px}
+.insp-section{padding:12px 14px;border-bottom:0.5px solid var(--border)}
+.insp-section-label{font-size:10px;font-weight:500;color:var(--t3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px}
+.score-breakdown{display:flex;flex-direction:column;gap:6px}
+.sb-row{display:flex;align-items:center;gap:8px}
+.sb-name{font-size:11px;color:var(--t2);width:68px;flex-shrink:0}
+.sb-track{flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.sb-fill{height:100%;border-radius:2px}
+.sb-val{font-size:11px;color:var(--t1);font-weight:500;min-width:26px;text-align:right}
+.insp-reason{font-size:11px;color:var(--t2);background:var(--bg0);border-radius:var(--r-md);padding:8px 10px;margin-top:8px;line-height:1.5}
+.insp-reason em{color:var(--warn-t);font-style:normal;font-weight:500}
+.action-row{display:flex;gap:6px;padding:12px 14px}
+.action-btn{flex:1;padding:7px 0;font-size:11px;font-weight:500;border-radius:var(--r-md);border:0.5px solid var(--border2);background:var(--bg2);cursor:pointer;color:var(--t1);transition:background .15s}
+.action-btn:hover{background:var(--bg0)}
+.action-btn.primary{background:var(--amber-bg);color:var(--amber);border-color:rgba(186,117,23,0.3)}
+.sync-indicator{display:flex;align-items:center;gap:6px;font-size:11px;padding:8px 10px;border-radius:var(--r-md);background:var(--success-bg)}
+.sync-indicator span{color:var(--success-t);font-weight:500}
+
+.subject-grid{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.subject-block{background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--r-md);overflow:hidden}
+.subject-head{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:0.5px solid var(--border);cursor:pointer}
+.subject-head:hover{background:var(--bg0)}
+.subj-avatar{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;flex-shrink:0}
+.subj-name{font-size:12px;font-weight:500;color:var(--t1)}
+.subj-meta{font-size:11px;color:var(--t3);margin-top:1px}
+.subj-clips{padding:8px 12px;display:flex;flex-direction:column;gap:4px}
+.clip-row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--r-md);cursor:pointer;transition:background .1s}
+.clip-row:hover{background:var(--bg1)}
+.clip-tc{font-family:monospace;font-size:10px;color:var(--t3);width:60px}
+.clip-text{font-size:12px;color:var(--t2);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clip-tag{font-size:10px;padding:1px 6px;border-radius:20px;background:var(--info-bg);color:var(--info-t)}
+.clip-tag.w{background:var(--warn-bg);color:var(--warn-t)}
+.clip-tag.s{background:var(--success-bg);color:var(--success-t)}
+
+.search-bar{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:0.5px solid var(--border);background:var(--bg0)}
+.search-bar input{flex:1;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r-md);padding:5px 10px;font-size:12px;color:var(--t1);font-family:inherit}
+.search-bar input::placeholder{color:var(--t3)}
+.search-bar input:focus{outline:none;border-color:var(--amber)}
+
+.assembly-btn{margin:10px 14px;padding:8px;font-size:12px;font-weight:500;background:var(--amber-bg);color:var(--amber);border:0.5px solid rgba(186,117,23,0.3);border-radius:var(--r-md);cursor:pointer;width:calc(100% - 28px);transition:background .15s}
+.bottom-bar{display:flex;align-items:center;gap:10px;padding:8px 14px;border-top:0.5px solid var(--border);background:var(--bg1)}
+.bb-stat{font-size:11px;color:var(--t3)}
+.bb-stat strong{color:var(--t1);font-weight:500}
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <div class="shell-tabs">
+    <button class="shell-tab on" onclick="showTab('prompt')">Refined prompt</button>
+    <button class="shell-tab" onclick="showTab('mvp')">Phase 1 MVP scope</button>
+    <button class="shell-tab" onclick="showTab('proto')">Desktop UI prototype</button>
+    <button class="shell-tab" onclick="showTab('gaps')">⚠ Product gaps</button>
+    <button class="shell-tab" onclick="showTab('arch')">⚠ Architecture fixes</button>
+    <button class="shell-tab" onclick="showTab('assembly-ux')">Assembly UX</button>
+  </div>
+
+  <!-- PANEL 1: REFINED PROMPT -->
+  <div class="panel on" id="tab-prompt">
+    <h2>SLATE — Refined product requirements prompt</h2>
+    <p class="lead">Updated for: both modes equally · all NLEs · dual-mode data model · complete copy-ready prompt.</p>
+
+    <div class="note"><strong>Key architectural decision added:</strong> Narrative and documentary are not two separate apps. They are two organizational models on top of one shared media engine. The data model uses a universal "Clip" object with a flexible metadata hierarchy that adapts to either mode.</div>
+
+    <h3>Dual-mode data model (new)</h3>
+    <div class="decision-grid">
+      <div class="decision-card">
+        <div class="dc-head n">Narrative mode hierarchy</div>
+        <div class="dc-body">
+          <p>Footage is organized by the script breakdown structure.</p>
+          <ul>
+            <li>Project → Episode/Reel → Scene → Setup → Take</li>
+            <li>Slate metadata: scene, shot, take number, director, DP</li>
+            <li>Rough cut assembles by scene → shot coverage → best take per setup</li>
+            <li>Script upload enables flub detection and line coverage reporting</li>
+          </ul>
+        </div>
+      </div>
+      <div class="decision-card">
+        <div class="dc-head d">Documentary mode hierarchy</div>
+        <div class="dc-body">
+          <p>Footage is organized by who speaks and when.</p>
+          <ul>
+            <li>Project → Shooting Day → Subject → Clip</li>
+            <li>Metadata: subject name, location, interview session, topic tags</li>
+            <li>Rough cut assembles by subject → topic → AI-scored best moments</li>
+            <li>Transcript search across all clips enables paper-cut workflow</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="note"><strong>Shared underneath:</strong> Both modes use the same Clip object (media path, proxy path, duration, timecode in/out, audio tracks, AI scores, annotations, status). Only the parent hierarchy and display logic differ. Users can switch a project between modes without re-ingesting.</div>
+
+    <h3>Full NLE export matrix (updated)</h3>
+    <div class="spec-grid">
+      <div class="spec-card">
+        <h4><span class="badge">FCPXML</span> Final Cut Pro X</h4>
+        <ul>
+          <li>Primary export format — richest metadata support</li>
+          <li>Circle/X/Flag maps to FCP keywords and ratings</li>
+          <li>Multicam clips for multi-angle setups</li>
+          <li>Compound clips for synced audio + video</li>
+          <li>Roles for audio channel assignment (dialogue, boom, lav)</li>
+        </ul>
+      </div>
+      <div class="spec-card">
+        <h4><span class="badge">EDL + AAF</span> Avid Media Composer</h4>
+        <ul>
+          <li>CMX 3600 EDL for cut list</li>
+          <li>AAF for multi-track audio with channel maps</li>
+          <li>Avid bin export with custom metadata columns</li>
+          <li>Circle/flag maps to Avid clip color coding</li>
+        </ul>
+      </div>
+      <div class="spec-card">
+        <h4><span class="badge">EDL + XML</span> Adobe Premiere Pro</h4>
+        <ul>
+          <li>Premiere XML sequence with track layout preserved</li>
+          <li>Markers for annotations and flagged frames</li>
+          <li>Essential Sound panel metadata for audio roles</li>
+          <li>Productions-compatible project structure</li>
+        </ul>
+      </div>
+      <div class="spec-card">
+        <h4><span class="badge">DRP XML</span> DaVinci Resolve</h4>
+        <ul>
+          <li>Resolve XML timeline with media pool structure</li>
+          <li>Color metadata flags for grade-pass handoff</li>
+          <li>Fairlight audio track layout preserved</li>
+          <li>Smart bins mirroring SLATE scene/subject structure</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Refined AI scoring spec (both modes)</h3>
+    <div class="spec-grid">
+      <div class="spec-card">
+        <h4>Narrative-specific scoring</h4>
+        <ul>
+          <li>Script comparison: transcript vs uploaded script text</li>
+          <li>Line coverage: did subject complete the full line?</li>
+          <li>Performance energy: prosody, speech rate, pauses</li>
+          <li>Continuity flag: check eyeline, wardrobe, props vs prior take</li>
+          <li>Composite weights: visual 40% · audio 30% · performance 30%</li>
+        </ul>
+      </div>
+      <div class="spec-card">
+        <h4>Documentary-specific scoring</h4>
+        <ul>
+          <li>Content density: unique information per minute of speech</li>
+          <li>Subject clarity: face detection + eye contact + frame stability</li>
+          <li>Moment detection: emotional register peaks, emphasis detection</li>
+          <li>Duplicate detection: flags clips covering same ground as prior</li>
+          <li>Composite weights: visual 30% · audio 30% · content 40%</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>What changed from v0.1</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+      <span class="tag s">Added dual-mode data model</span>
+      <span class="tag s">Added all 4 NLE export specs</span>
+      <span class="tag s">Split AI scoring weights by mode</span>
+      <span class="tag s">Added continuity flag (narrative)</span>
+      <span class="tag s">Added content density score (doc)</span>
+      <span class="tag s">Added mode-switching without re-ingest</span>
+      <span class="tag w">Removed Windows from V1 scope (confirmed)</span>
+      <span class="tag a">Open: cloud storage backend preference</span>
+      <span class="tag a">Open: NLE plugin vs export-only</span>
+    </div>
+  </div>
+
+  <!-- PANEL 2: MVP SCOPE -->
+  <div class="panel" id="tab-mvp">
+    <h2>Phase 1 MVP — 8-week scope</h2>
+    <p class="lead">Everything a DIT or post coordinator needs to get synced, organized dailies to a director review link. No AI scoring yet — that ships in Phase 2. Ship something real, fast.</p>
+
+    <div class="note"><strong>Phase 1 philosophy:</strong> The bottleneck on set isn't AI — it's <strong>the hour it takes to manually sync audio, rename files, and build bins.</strong> Phase 1 eliminates that entirely. A single watch-folder ingest + auto-sync gets you to an organized, proxy-playable bin in under 10 minutes. AI scoring layers on top in Phase 2.</div>
+
+    <table class="scope-table">
+      <thead>
+        <tr>
+          <th style="width:70px">Weeks</th>
+          <th style="width:180px">Feature</th>
+          <th>What ships</th>
+          <th style="width:80px">Effort</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="week">1–2</td>
+          <td><div class="feature-name">Watch folder + ingest engine</div></td>
+          <td>
+            <div class="feature-desc">Background daemon monitors local/network volumes. Detects new media, copies to project folder, computes checksum, generates 1080p H.264 proxy via VideoToolbox. Supports ARRIRAW, BRAW, ProRes, R3D, MXF, MP4. Menu bar icon shows progress.</div>
+            <div class="effort-bar"><div class="effort-fill" style="width:90%"></div></div>
+          </td>
+          <td><span class="tag a">High</span></td>
+        </tr>
+        <tr>
+          <td class="week">2–3</td>
+          <td><div class="feature-name">Metadata parsing + auto-naming</div></td>
+          <td>
+            <div class="feature-desc">Read scene/shot/take from filenames, embedded XMP, and SMPTE timecode. Auto-rename proxies to standard convention. Handle both narrative (Sc01_Sh002_T3) and doc (SubjectName_Day_Clip) patterns. User can edit parsed metadata inline.</div>
+            <div class="effort-bar"><div class="effort-fill" style="width:60%"></div></div>
+          </td>
+          <td><span class="tag i">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="week">3–4</td>
+          <td><div class="feature-name">Audio sync engine</div></td>
+          <td>
+            <div class="feature-desc">Waveform cross-correlation clap detection. Handles double-claps and missed slates. SMPTE LTC/VITC fallback. Multi-track ISO: auto-assigns boom vs lav. Drift correction for takes over 10 min. Confidence score per sync (green/yellow/red). Manual drag-to-sync waveform editor for red-confidence cases.</div>
+            <div class="effort-bar"><div class="effort-fill" style="width:95%"></div></div>
+          </td>
+          <td><span class="tag a">High</span></td>
+        </tr>
+        <tr>
+          <td class="week">4–5</td>
+          <td><div class="feature-name">Dual-mode browser UI</div></td>
+          <td>
+            <div class="feature-desc">macOS SwiftUI app. Mode toggle: Narrative (scene/shot/take) or Documentary (subject/day/clip). Proxy playback with frame-accurate scrubbing. Circle/X/Flag controls. Basic take notes field. Filtering by flag status. Scene completion indicator.</div>
+            <div class="effort-bar"><div class="effort-fill" style="width:75%"></div></div>
+          </td>
+          <td><span class="tag i">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="week">5–6</td>
+          <td><div class="feature-name">Basic assembly + NLE export</div></td>
+          <td>
+            <div class="feature-desc">One-click rough assembly: narrative = top-circled take per setup in scene order; doc = circled clips grouped by subject. Preview assembly in SLATE before export. Export: FCPXML, CMX EDL, Premiere XML, Resolve XML. Audio: AAF with multi-track layout.</div>
+            <div class="effort-bar"><div class="effort-fill" style="width:70%"></div></div>
+          </td>
+          <td><span class="tag i">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="week">6–7</td>
+          <td><div class="feature-name">Web review portal (v1)</div></td>
+          <td>
+            <div class="feature-desc">Next.js web app. Share a project or scene as a time-limited link (no login for guest). HLS proxy playback. Timestamped text comments. Circle/flag from browser. Comments sync back to desktop in real time via Supabase Realtime.</div>
+            <div class="effort-bar"><div class="effort-fill" style="width:65%"></div></div>
+          </td>
+          <td><span class="tag i">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="week">7–8</td>
+          <td><div class="feature-name">Polish + production test</div></td>
+          <td>
+            <div class="feature-desc">Run Phase 1 on a real shoot day. Fix ingest edge cases. Tune sync confidence thresholds. Add keyboard shortcuts. Crash reporting (Sentry). Performance profiling M1–M4 Max. Ship to 2–3 beta users in production.</div>
+            <div class="effort-bar"><div class="effort-fill" style="width:40%"></div></div>
+          </td>
+          <td><span class="tag s">Low</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Phase 1 success criteria</h3>
+    <div class="spec-grid">
+      <div class="spec-card">
+        <h4>Speed targets</h4>
+        <ul>
+          <li>Card mount → proxies ready: under 20 min for a 2-hour card</li>
+          <li>Audio sync: under 2 min per hour of footage</li>
+          <li>Rough assembly export: under 60 seconds for a full shoot day</li>
+          <li>Review link live: under 5 min after assembly</li>
+        </ul>
+      </div>
+      <div class="spec-card">
+        <h4>Quality targets</h4>
+        <ul>
+          <li>Sync accuracy: ≥98% correct on first attempt</li>
+          <li>Metadata parse accuracy: ≥95% on standard naming conventions</li>
+          <li>Zero data loss: checksums verified on 100% of ingested files</li>
+          <li>Web portal playback: ≤2s load on standard broadband</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>What's explicitly out of Phase 1</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <span class="tag d">AI take scoring</span>
+      <span class="tag d">Transcription</span>
+      <span class="tag d">iOS mobile app</span>
+      <span class="tag d">Frame.io integration</span>
+      <span class="tag d">Airtable sync</span>
+      <span class="tag d">Multi-user presence</span>
+      <span class="tag d">Voice annotations</span>
+      <span class="tag d">Performance scoring</span>
+    </div>
+  </div>
+
+  <!-- PANEL 3: PROTOTYPE -->
+  <div class="panel" id="tab-proto">
+    <h2>Desktop UI prototype</h2>
+    <p class="lead">Interactive mockup of the Phase 1 macOS desktop app. Toggle between Narrative and Documentary modes. Click a take to inspect it.</p>
+
+    <div class="proto-shell">
+      <div class="proto-topbar">
+        <div class="proto-logo">SL<span>A</span>TE</div>
+        <div class="proto-mode-toggle">
+          <button class="proto-mode-btn on" id="mode-n" onclick="setMode('narrative')">Narrative</button>
+          <button class="proto-mode-btn" id="mode-d" onclick="setMode('doc')">Documentary</button>
+        </div>
+        <div class="proto-status" style="margin-left:auto">
+          <div class="status-dot green"></div>
+          <span>Syncing 3 takes</span>
+          <span style="color:var(--border2);margin:0 4px">·</span>
+          <div class="status-dot amber"></div>
+          <span>2 need review</span>
+        </div>
+      </div>
+
+      <div class="proto-main">
+
+        <!-- Sidebar Narrative -->
+        <div class="proto-sidebar" id="sidebar-narrative">
+          <div class="sidebar-section">
+            <div class="sidebar-label">Scenes</div>
+            <div class="scene-item on" onclick="selectScene(this)">
+              <div class="si-name">Sc 01 — Kitchen</div>
+              <div class="si-meta">4 setups · 12 takes</div>
+              <div class="si-bar"><div class="si-fill" style="width:75%;background:#1D9E75"></div></div>
+            </div>
+            <div class="scene-item" onclick="selectScene(this)">
+              <div class="si-name">Sc 02 — Hallway</div>
+              <div class="si-meta">2 setups · 6 takes</div>
+              <div class="si-bar"><div class="si-fill" style="width:50%;background:#BA7517"></div></div>
+            </div>
+            <div class="scene-item" onclick="selectScene(this)">
+              <div class="si-name">Sc 03 — Ext. Street</div>
+              <div class="si-meta">5 setups · 18 takes</div>
+              <div class="si-bar"><div class="si-fill" style="width:20%;background:#E24B4A"></div></div>
+            </div>
+            <div class="scene-item" onclick="selectScene(this)">
+              <div class="si-name">Sc 04 — Office</div>
+              <div class="si-meta">3 setups · 9 takes</div>
+              <div class="si-bar"><div class="si-fill" style="width:0%"></div></div>
+            </div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-label">Filter</div>
+            <div class="scene-item" style="display:flex;align-items:center;gap:6px">
+              <input type="checkbox" checked id="f-circled" style="margin:0">
+              <label for="f-circled" class="si-name" style="cursor:pointer">Circled only</label>
+            </div>
+            <div class="scene-item" style="display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="f-deprio" style="margin:0">
+              <label for="f-deprio" class="si-name" style="cursor:pointer">Show deprioritized</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar Doc -->
+        <div class="proto-sidebar" id="sidebar-doc" style="display:none">
+          <div class="sidebar-section">
+            <div class="sidebar-label">Subjects</div>
+            <div class="scene-item on"><div class="si-name">Rick Ridgeway</div><div class="si-meta">Day 1 · 47 min footage</div></div>
+            <div class="scene-item"><div class="si-name">Meredith Danluck</div><div class="si-meta">Day 1 · 22 min footage</div></div>
+            <div class="scene-item"><div class="si-name">B-roll — Landscape</div><div class="si-meta">Day 1 · 1h 12 min</div></div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-label">Topics</div>
+            <div class="scene-item"><div class="si-name" style="color:var(--info-t)">Origin story</div></div>
+            <div class="scene-item"><div class="si-name" style="color:var(--success-t)">Conservation</div></div>
+            <div class="scene-item"><div class="si-name" style="color:var(--warn-t)">Conflict</div></div>
+          </div>
+        </div>
+
+        <!-- Center Narrative -->
+        <div class="mode-panel on" id="center-narrative">
+          <div class="center-header">
+            <div>
+              <div class="center-title">Sc 01 — Kitchen · Setup A (Wide)</div>
+              <div class="center-meta">4 takes · Cam A + B · 2 ISO tracks synced</div>
+            </div>
+            <div class="view-tabs">
+              <button class="view-tab on">Takes</button>
+              <button class="view-tab">Waveform</button>
+              <button class="view-tab">Coverage</button>
+            </div>
+          </div>
+          <div class="takes-grid">
+            <div class="take-row selected" onclick="selectTake(this,1)">
+              <div class="take-top">
+                <div class="take-thumb">Proxy<div class="take-thumb-bar"><div class="take-thumb-prog" style="width:100%;background:#1D9E75"></div></div></div>
+                <div class="take-info">
+                  <div class="take-label">Take 3 <span class="tag s" style="font-size:10px;padding:1px 6px">Circled</span></div>
+                  <div class="take-sub">00:01:42 · CamA · 2x boom + lav synced</div>
+                  <div class="take-scores">
+                    <span class="score-pill" style="background:var(--success-bg);color:var(--success-t)">Focus 94</span>
+                    <span class="score-pill" style="background:var(--success-bg);color:var(--success-t)">Audio 91</span>
+                    <span class="score-pill" style="background:var(--info-bg);color:var(--info-t)">Perf 78</span>
+                  </div>
+                </div>
+                <div class="take-score-main"><div class="score-num" style="color:#1D9E75">88</div><div class="score-lbl">score</div></div>
+              </div>
+              <div class="take-waveform" id="wf1"></div>
+            </div>
+            <div class="take-row" onclick="selectTake(this,2)">
+              <div class="take-top">
+                <div class="take-thumb">Proxy<div class="take-thumb-bar"><div class="take-thumb-prog" style="width:100%;background:#BA7517"></div></div></div>
+                <div class="take-info">
+                  <div class="take-label">Take 2 <span class="tag w" style="font-size:10px;padding:1px 6px">Flagged</span></div>
+                  <div class="take-sub">00:01:38 · CamA · Sync confidence: yellow</div>
+                  <div class="take-scores">
+                    <span class="score-pill" style="background:var(--warn-bg);color:var(--warn-t)">Focus 71</span>
+                    <span class="score-pill" style="background:var(--success-bg);color:var(--success-t)">Audio 88</span>
+                    <span class="score-pill" style="background:var(--warn-bg);color:var(--warn-t)">Perf 65</span>
+                  </div>
+                </div>
+                <div class="take-score-main"><div class="score-num" style="color:#BA7517">74</div><div class="score-lbl">score</div></div>
+              </div>
+              <div class="take-waveform" id="wf2"></div>
+            </div>
+            <div class="take-row" onclick="selectTake(this,3)" style="opacity:0.6">
+              <div class="take-top">
+                <div class="take-thumb">Proxy<div class="take-thumb-bar"><div class="take-thumb-prog" style="width:100%;background:#E24B4A"></div></div></div>
+                <div class="take-info">
+                  <div class="take-label">Take 1 <span class="tag d" style="font-size:10px;padding:1px 6px">Deprioritized</span></div>
+                  <div class="take-sub">00:01:12 · CamA · Line flub at 0:58</div>
+                  <div class="take-scores">
+                    <span class="score-pill" style="background:var(--danger-bg);color:var(--danger-t)">Focus 82</span>
+                    <span class="score-pill" style="background:var(--success-bg);color:var(--success-t)">Audio 85</span>
+                    <span class="score-pill" style="background:var(--danger-bg);color:var(--danger-t)">Perf 41</span>
+                  </div>
+                </div>
+                <div class="take-score-main"><div class="score-num" style="color:#E24B4A">56</div><div class="score-lbl">score</div></div>
+              </div>
+              <div class="take-waveform" id="wf3"></div>
+            </div>
+          </div>
+          <div class="bottom-bar">
+            <span class="bb-stat"><strong>Sc 01</strong> — 3/4 setups with circled take</span>
+            <button style="margin-left:auto;padding:5px 14px;font-size:11px;font-weight:500;background:var(--amber-bg);color:var(--amber);border:0.5px solid rgba(186,117,23,0.3);border-radius:var(--r-md);cursor:pointer">Assemble Sc 01 rough cut</button>
+          </div>
+        </div>
+
+        <!-- Center Doc -->
+        <div class="mode-panel" id="center-doc">
+          <div class="search-bar">
+            <input placeholder="Search transcript... e.g. 'climate impact'">
+          </div>
+          <div class="center-header">
+            <div>
+              <div class="center-title">Rick Ridgeway — Day 1</div>
+              <div class="center-meta">8 clips · 47 min total · Transcription complete</div>
+            </div>
+          </div>
+          <div class="subject-grid">
+            <div class="subject-block">
+              <div class="subject-head">
+                <div class="subj-avatar" style="background:var(--info-bg);color:var(--info-t)">RR</div>
+                <div><div class="subj-name">Rick Ridgeway</div><div class="subj-meta">Interview A · 14:22 duration · 6 clips</div></div>
+                <span class="tag s" style="margin-left:auto;font-size:10px">4 circled</span>
+              </div>
+              <div class="subj-clips">
+                <div class="clip-row">
+                  <div class="clip-tc">00:02:14</div>
+                  <div class="clip-text">"The moment I realized the mountain was actually alive, that every rock..."</div>
+                  <div style="display:flex;gap:4px"><span class="clip-tag s">Origin</span></div>
+                </div>
+                <div class="clip-row">
+                  <div class="clip-tc">00:08:41</div>
+                  <div class="clip-text">"We don't protect what we don't love. And you can't love what you don't..."</div>
+                  <div style="display:flex;gap:4px"><span class="clip-tag">Conservation</span></div>
+                </div>
+                <div class="clip-row">
+                  <div class="clip-tc">00:19:07</div>
+                  <div class="clip-text">"The corporation had a different definition of wilderness than we did..."</div>
+                  <div style="display:flex;gap:4px"><span class="clip-tag w">Conflict</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="subject-block">
+              <div class="subject-head">
+                <div class="subj-avatar" style="background:var(--teal-bg);color:var(--teal)">MD</div>
+                <div><div class="subj-name">Meredith Danluck</div><div class="subj-meta">Interview B · 8:14 duration · 2 clips</div></div>
+                <span class="tag a" style="margin-left:auto;font-size:10px">1 circled</span>
+              </div>
+            </div>
+          </div>
+          <button class="assembly-btn">Assemble rough cut by subject</button>
+        </div>
+
+        <!-- Inspector -->
+        <div class="proto-inspector">
+          <div class="insp-header">
+            <div class="insp-title" id="insp-title">Take 3 — Sc 01 Sh A</div>
+            <div class="insp-sub" id="insp-sub">CamA · 00:01:42 · 23.976fps</div>
+          </div>
+          <div class="insp-section">
+            <div class="insp-section-label">Audio sync</div>
+            <div class="sync-indicator"><div class="status-dot green"></div><span>Synced — high confidence</span></div>
+            <div style="font-size:11px;color:var(--t3);margin-top:6px">Waveform match · offset +2.4f · 2 ISO tracks</div>
+          </div>
+          <div class="insp-section" id="insp-scores">
+            <div class="insp-section-label">AI score breakdown</div>
+            <div class="score-breakdown">
+              <div class="sb-row"><div class="sb-name">Focus</div><div class="sb-track"><div class="sb-fill" style="width:94%;background:#1D9E75"></div></div><div class="sb-val">94</div></div>
+              <div class="sb-row"><div class="sb-name">Exposure</div><div class="sb-track"><div class="sb-fill" style="width:89%;background:#1D9E75"></div></div><div class="sb-val">89</div></div>
+              <div class="sb-row"><div class="sb-name">Audio</div><div class="sb-track"><div class="sb-fill" style="width:91%;background:#1D9E75"></div></div><div class="sb-val">91</div></div>
+              <div class="sb-row"><div class="sb-name">Performance</div><div class="sb-track"><div class="sb-fill" style="width:78%;background:#BA7517"></div></div><div class="sb-val">78</div></div>
+              <div class="sb-row"><div class="sb-name">Stability</div><div class="sb-track"><div class="sb-fill" style="width:96%;background:#1D9E75"></div></div><div class="sb-val">96</div></div>
+            </div>
+            <div class="insp-reason" id="insp-reason">Performance dip: subject glanced off-camera at <em>1:12</em>. All other metrics nominal.</div>
+          </div>
+          <div class="action-row">
+            <button class="action-btn primary">Circle</button>
+            <button class="action-btn">Flag</button>
+            <button class="action-btn">Deprioritize</button>
+          </div>
+          <div class="insp-section">
+            <div class="insp-section-label">Notes</div>
+            <textarea style="width:100%;background:var(--bg0);border:0.5px solid var(--border);border-radius:var(--r-md);padding:8px;font-size:12px;color:var(--t1);font-family:inherit;resize:none;line-height:1.5" rows="3" placeholder="Add director note..."></textarea>
+          </div>
+          <div class="insp-section">
+            <div class="insp-section-label">Export</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <span class="tag i">FCPXML</span>
+              <span class="tag i">EDL</span>
+              <span class="tag i">Premiere XML</span>
+              <span class="tag i">Resolve XML</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showTab(id){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.shell-tab').forEach(t=>t.classList.remove('on'));
+  document.getElementById('tab-'+id).classList.add('on');
+  event.target.classList.add('on');
+}
+
+function setMode(mode){
+  const isN=mode==='narrative';
+  document.getElementById('mode-n').classList.toggle('on',isN);
+  document.getElementById('mode-d').classList.toggle('on',!isN);
+  document.getElementById('sidebar-narrative').style.display=isN?'':'none';
+  document.getElementById('sidebar-doc').style.display=isN?'none':'';
+  const cn=document.getElementById('center-narrative');
+  const cd=document.getElementById('center-doc');
+  if(isN){cn.style.display='flex';cn.classList.add('on');cd.style.display='none';cd.classList.remove('on');}
+  else{cd.style.display='flex';cd.classList.add('on');cn.style.display='none';cn.classList.remove('on');}
+}
+
+function selectScene(el){
+  document.querySelectorAll('#sidebar-narrative .scene-item').forEach(s=>s.classList.remove('on'));
+  el.classList.add('on');
+}
+
+const takeData={
+  1:{title:'Take 3 — Sc 01 Sh A',sub:'CamA · 00:01:42 · 23.976fps',reason:'Performance dip: subject glanced off-camera at <em>1:12</em>. All other metrics nominal.',scores:[94,89,91,78,96]},
+  2:{title:'Take 2 — Sc 01 Sh A',sub:'CamA · 00:01:38 · 23.976fps',reason:'Focus soft at <em>0:31</em> — camera pulled slightly. Sync confidence yellow: verify offset.',scores:[71,80,88,65,72]},
+  3:{title:'Take 1 — Sc 01 Sh A',sub:'CamA · 00:01:12 · 23.976fps',reason:'Line flub at <em>0:58</em>: "I never—" restart. Deprioritized automatically. Media preserved.',scores:[82,85,85,41,90]}
+};
+
+function scoreColor(v){return v>=80?'#1D9E75':v>=60?'#BA7517':'#E24B4A'}
+
+function selectTake(el,idx){
+  document.querySelectorAll('.take-row').forEach(r=>r.classList.remove('selected'));
+  el.classList.add('selected');
+  const d=takeData[idx];
+  document.getElementById('insp-title').textContent=d.title;
+  document.getElementById('insp-sub').textContent=d.sub;
+  document.getElementById('insp-reason').innerHTML=d.reason;
+  document.querySelectorAll('#insp-scores .sb-row').forEach((r,i)=>{
+    r.querySelector('.sb-fill').style.width=d.scores[i]+'%';
+    r.querySelector('.sb-fill').style.background=scoreColor(d.scores[i]);
+    r.querySelector('.sb-val').textContent=d.scores[i];
+  });
+  renderWaveforms();
+}
+
+function renderWaveforms(){
+  [1,2,3].forEach(i=>{
+    const el=document.getElementById('wf'+i);
+    if(!el)return;
+    el.innerHTML='';
+    const sel=el.closest('.take-row').classList.contains('selected');
+    for(let j=0;j<60;j++){
+      const b=document.createElement('div');
+      b.className='wf-bar';
+      b.style.height=Math.max(3,Math.floor(Math.random()*18+4))+'px';
+      b.style.alignSelf='center';
+      el.appendChild(b);
+    }
+  });
+}
+
+window.addEventListener('DOMContentLoaded',renderWaveforms);
+</script>
+
+<!-- ══════════════════════════════════════════════════════
+     NEW PANEL: PRODUCT GAPS
+══════════════════════════════════════════════════════ -->
+<style>
+.gap-card{background:var(--bg1);border:0.5px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:14px}
+.gap-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
+.gap-num{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.gap-num.p1{background:var(--danger-bg);color:var(--danger-t)}
+.gap-num.p2{background:var(--warn-bg);color:var(--warn-t)}
+.gap-title{font-size:13px;font-weight:500;color:var(--t1)}
+.gap-sub{font-size:11px;color:var(--t3);margin-top:2px}
+.gap-body{font-size:12px;color:var(--t2);line-height:1.6;margin-bottom:10px}
+.gap-spec{background:var(--bg0);border-radius:var(--r-md);padding:10px 12px;font-size:11px;color:var(--t2);border:0.5px solid var(--border);margin-top:8px}
+.gap-spec .lbl{font-size:10px;font-weight:500;color:var(--amber);letter-spacing:0.06em;text-transform:uppercase;margin-bottom:5px;font-family:monospace}
+.gap-spec pre{font-family:monospace;font-size:10px;color:var(--t2);line-height:1.6;overflow-x:auto;white-space:pre-wrap}
+.gap-spec pre em{color:var(--teal);font-style:normal}
+.tbl{width:100%;border-collapse:collapse;font-size:12px;margin:10px 0}
+.tbl th{text-align:left;padding:6px 10px;font-size:11px;font-weight:500;color:var(--t2);border-bottom:0.5px solid var(--border2);background:var(--bg0)}
+.tbl td{padding:7px 10px;border-bottom:0.5px solid var(--border);color:var(--t2);vertical-align:top}
+.tbl tr:last-child td{border-bottom:none}
+.flow-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:10px 0}
+.fb{background:var(--bg0);border:0.5px solid var(--border);border-radius:var(--r-md);padding:6px 12px;font-size:11px;color:var(--t2);text-align:center}
+.fb.hi{background:var(--amber-bg);border-color:rgba(186,117,23,0.3);color:var(--amber)}
+.fa{color:var(--t3);font-size:13px}
+</style>
+
+<div class="panel" id="tab-gaps">
+  <h2>Product gaps &amp; solutions</h2>
+  <p class="lead">Six gaps identified vs. production-level requirements. P1 = Phase 1 addition (must fix before beta). P2 = Phase 2 addition (data model must accommodate now).</p>
+
+  <div class="note"><strong>The data model is the constraint.</strong> P2 features can wait to be built, but the <em>schema</em> must accommodate them now. Schema migrations after beta distribution are painful. Add the fields now, implement later.</div>
+
+  <!-- GAP 1 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p1">1</div>
+      <div><div class="gap-title">Multi-camera sync <span class="tag d" style="font-size:10px;padding:1px 7px">P1 — Phase 1 addition</span></div><div class="gap-sub">Almost every TV drama shoots 2–4 cameras simultaneously. Single-camera sync forces a DIT to run the workflow N times.</div></div>
+    </div>
+    <div class="gap-body">The current <code>syncClip(videoURL, audioFiles, fps)</code> takes one video. Multi-cam requires a <code>syncCameraGroup(cameras[], audioFiles[], fps)</code> that syncs all angles to a shared timecode reference in a single pass and stores per-angle offsets.</div>
+    <div class="gap-spec">
+      <div class="lbl">Schema addition (NarrativeMeta)</div>
+      <pre>"cameraGroup": { "groupId": "string", "angle": "A"|"B"|"C"|"D", "cameraBody": "string", "lens": "string", "isMainAngle": boolean }
+"cameraGroupSyncResult": { "groupId": "string", "offsets": [{ "angle": "A", "offsetFrames": 0, "driftPPM": 2.1 }] }</pre>
+    </div>
+  </div>
+
+  <!-- GAP 2 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p1">2</div>
+      <div><div class="gap-title">Notification &amp; delivery hook <span class="tag d" style="font-size:10px;padding:1px 7px">P1 — Phase 1 addition</span></div><div class="gap-sub">The 20-minute promise ends with a DIT manually copy-pasting a URL. The last mile must be automated.</div></div>
+    </div>
+    <div class="gap-body">On assembly completion, SLATE auto-generates the review link and sends it to the director via iMessage (or email fallback). DIT configures delivery targets per-project. Status shows in the desktop status bar: "Review link sent to Sarah (Dir) 2m ago."</div>
+    <div class="flow-row">
+      <div class="fb" style="background:var(--success-bg);border-color:rgba(29,158,117,0.3);color:var(--success-t)">Assembly done</div>
+      <div class="fa">→</div>
+      <div class="fb hi">Link auto-generated</div>
+      <div class="fa">→</div>
+      <div class="fb hi">iMessage to director</div>
+      <div class="fa">→</div>
+      <div class="fb">Director taps → portal</div>
+      <div class="fa">→</div>
+      <div class="fb" style="background:var(--success-bg);border-color:rgba(29,158,117,0.3);color:var(--success-t)">Notes sync to desktop</div>
+    </div>
+    <div class="gap-spec">
+      <div class="lbl">New: NotificationService.swift</div>
+      <pre>struct DeliveryTarget { let name: String; let method: <em>DeliveryMethod</em>; let address: String }
+enum DeliveryMethod { case iMessage, email, slack }
+// iMessage: osascript → Messages.app. Email: SendGrid. Slack: webhook.
+// project.notificationTargets: [DeliveryTarget]   project.autoDeliverOnAssembly: Bool</pre>
+    </div>
+  </div>
+
+  <!-- GAP 3 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p1">3</div>
+      <div><div class="gap-title">Proxy color space — decide &amp; lock <span class="tag d" style="font-size:10px;padding:1px 7px">P1 — decide now</span></div><div class="gap-sub">A director reviewing on an iPad gets an unwatchable log image unless the proxy has a viewing LUT applied.</div></div>
+    </div>
+    <div class="gap-body"><strong>Decision: Option A (LUT-applied proxy).</strong> Detect camera model → apply manufacturer standard viewing LUT (ARRI LogC→Rec709, Sony S-Cinetone, RED IPP2). Store <code>proxyLUT</code> and <code>proxyColorSpace</code> on Clip. Phase 2 adds opt-in flat proxy per-project.</div>
+    <div class="gap-spec">
+      <div class="lbl">Schema addition (Clip)</div>
+      <pre>"proxyLUT": "string | null",        // e.g. "ARRI LogC3 to Rec709"
+"proxyColorSpace": "rec709" | "log",  // default: "rec709"
+"proxyGamma": "string | null"          // e.g. "2.4"</pre>
+    </div>
+  </div>
+
+  <!-- GAP 4 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p2">4</div>
+      <div><div class="gap-title">Camera &amp; lens metadata extraction <span class="tag w" style="font-size:10px;padding:1px 7px">P2 — schema now</span></div><div class="gap-sub">ARRIRAW, BRAW, R3D embed lens, T-stop, ISO, focus distance per-clip. Extract during ingest, export to NLE columns.</div></div>
+    </div>
+    <div class="gap-spec">
+      <div class="lbl">Schema addition (cameraMetadata on Clip)</div>
+      <pre>"cameraMetadata": { "bodyModel": "ARRI ALEXA 35", "lens": "Cooke S7/i 32mm T2.0",
+  "focalLength": 32, "aperture": 2.0, "iso": 800, "shutterAngle": 172.8,
+  "whiteBalance": 5600, "colorSpace": "LogC3 AWG3" }</pre>
+    </div>
+  </div>
+
+  <!-- GAP 5 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p2">5</div>
+      <div><div class="gap-title">Script supervisor / continuity import <span class="tag w" style="font-size:10px;padding:1px 7px">P2</span></div><div class="gap-sub">SS one-liner reports (circle/NG/alt, continuity notes) should pre-populate SLATE clip status before AI scoring runs.</div></div>
+    </div>
+    <div class="gap-body">Import from Movie Magic Scheduling CSV, Final Draft PDF reports, ScriptE CSV/XML, or custom CSV. Maps to: scene, setup, take → circle/NG/alt status + SS note text → displayed in inspector Continuity section.</div>
+  </div>
+
+  <!-- GAP 6 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p2">6</div>
+      <div><div class="gap-title">Documentary mode UX parity <span class="tag w" style="font-size:10px;padding:1px 7px">P2 — design in P1</span></div><div class="gap-sub">Doc mode data model is complete. UI is a placeholder. Needs: subject timeline, paper-cut interface, topic clustering.</div></div>
+    </div>
+    <table class="tbl">
+      <thead><tr><th>Feature</th><th>Narrative (exists)</th><th>Documentary (needed)</th></tr></thead>
+      <tbody>
+        <tr><td>Center panel</td><td>Take grid · thumbnail + scores</td><td>Clip timeline · chronological + topic tags</td></tr>
+        <tr><td>Assembly</td><td>Best take per setup</td><td>Top moments per topic per subject</td></tr>
+        <tr><td>Search</td><td>Scene/shot/take number</td><td>Full transcript search across all clips</td></tr>
+        <tr><td>Special</td><td>Coverage map</td><td>Paper cut (transcript → drag to assembly)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     NEW PANEL: ARCHITECTURE FIXES
+══════════════════════════════════════════════════════ -->
+<div class="panel" id="tab-arch">
+  <h2>Architecture fixes</h2>
+  <p class="lead">Five technical gaps — two are pre-beta blockers. Must be resolved before any real-production shoot day test.</p>
+
+  <div class="note"><strong>Blockers 1 and 2 (IPC + crash recovery) block beta.</strong> Without XPC, the desktop app cannot observe daemon progress. Without crash recovery, a sleep/crash during ingest silently corrupts the project. Do not schedule a beta shoot day until both are green.</div>
+
+  <!-- ARCH 1 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p1">1</div>
+      <div><div class="gap-title">IPC: NotificationCenter → XPC <span class="tag d" style="font-size:10px;padding:1px 7px">BLOCKER</span></div><div class="gap-sub">NotificationCenter is in-process only. The daemon and app are two separate OS processes. The notification never arrives.</div></div>
+    </div>
+    <div class="gap-body">XPC (Apple's standard IPC for macOS) is the correct solution. The daemon exposes a named XPC service (<code>com.mountaintoppics.slate.ingestd</code>). The app connects via <code>NSXPCConnection</code> and receives <code>IngestProgressReport</code> objects over the channel.</div>
+    <div class="gap-spec">
+      <div class="lbl">XPC Protocol (new file: IngestXPCProtocol.swift)</div>
+      <pre>@objc protocol <em>IngestXPCProtocol</em> {
+  func progressDidUpdate(_ report: IngestProgressReportXPC, withReply: @escaping () -> Void)
+  func registerWatchFolder(_ config: WatchFolderConfigXPC, withReply: @escaping (Bool) -> Void)
+  func pauseIngest(withReply: @escaping () -> Void)
+}
+// App-side: IPCManager.swift connects via NSXPCConnection, @Published var progressReport</pre>
+    </div>
+  </div>
+
+  <!-- ARCH 2 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p1">2</div>
+      <div><div class="gap-title">Ingest crash recovery state machine <span class="tag d" style="font-size:10px;padding:1px 7px">BLOCKER</span></div><div class="gap-sub">Ingest state lives in memory. A crash or sleep leaves orphaned Clip records. No resume on next launch.</div></div>
+    </div>
+    <div class="gap-body">All ingest state must be persisted to GRDB <em>before</em> each stage begins. On next launch, the daemon reads any records stuck in non-terminal stages (copying, proxy_active) and resumes them automatically.</div>
+    <div class="gap-spec">
+      <div class="lbl">GRDB: ingest_queue table</div>
+      <pre>CREATE TABLE ingest_queue (
+  id TEXT PRIMARY KEY, clip_id TEXT, source_path TEXT, destination_path TEXT,
+  stage TEXT DEFAULT 'queued',   -- queued|copying|checksumming|proxy_pending|proxy_active|sync_pending|ready|failed
+  stage_started_at REAL, attempts INTEGER DEFAULT 0, last_error TEXT,
+  created_at REAL, updated_at REAL
+);
+-- On launch: records with stage='copying' older than 5min → reset to 'queued'. Retry automatically.</pre>
+    </div>
+  </div>
+
+  <!-- ARCH 3 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p2">3</div>
+      <div><div class="gap-title">Commit to Cloudflare R2 as cloud storage backend</div><div class="gap-sub">R2 is already assumed in 3 edge functions. The "open question" is already decided by the code.</div></div>
+    </div>
+    <div class="gap-body">Formalize: add <code>contracts/storage.md</code> documenting bucket convention (<code>{projectId}/{clipId}/proxy.mp4</code>), presigned URL expiry (24h review / 7d download), upload path from daemon. R2 egress is $0 vs AWS S3's $0.09/GB — correct choice given proxy streaming volume.</div>
+  </div>
+
+  <!-- ARCH 4 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p2">4</div>
+      <div><div class="gap-title">Desktop CI pipeline</div><div class="gap-sub">Web has CI. Swift packages have test scripts. The desktop app has no CI — a broken @main conflict won't be caught.</div></div>
+    </div>
+    <div class="gap-spec">
+      <div class="lbl">.github/workflows/desktop-ci.yml (key steps)</div>
+      <pre>runs-on: macos-14  # Apple Silicon runner
+xcodebuild build -scheme SLATEDesktop -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+bash scripts/test-sync.sh
+python3 -m json.tool contracts/*.json  # validate all contracts are valid JSON</pre>
+    </div>
+  </div>
+
+  <!-- ARCH 5 -->
+  <div class="gap-card">
+    <div class="gap-head">
+      <div class="gap-num p2">5</div>
+      <div><div class="gap-title">Code signing &amp; notarization — required before beta</div><div class="gap-sub">macOS Sequoia blocks unsigned apps on first launch. Beta users on clean Macs can't open SLATE without this.</div></div>
+    </div>
+    <div class="gap-body">Steps: Developer ID Application certificate → store as GitHub secret → add <code>xcrun notarytool submit</code> to CI after archive → configure Hardened Runtime entitlements (watch folders, network, iMessage scripting). ~3 min per build. Must be done before distributing any .dmg.</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     NEW PANEL: ASSEMBLY UX
+══════════════════════════════════════════════════════ -->
+<style>
+.assy-row{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg2);border-radius:var(--r-md);margin-bottom:4px;cursor:pointer}
+.assy-row:hover{background:var(--bg0)}
+.assy-row.warn{background:var(--warn-bg);border:0.5px solid rgba(186,117,23,0.2)}
+.assy-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.assy-thumb{width:72px;height:40px;background:var(--bg0);border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--t3);flex-shrink:0}
+.assy-label{flex:1;font-size:12px;font-weight:500;color:var(--t1)}
+.assy-meta{font-size:10px;color:var(--t3)}
+.assy-tc{font-family:monospace;font-size:10px;color:var(--t3);min-width:36px;text-align:right}
+.assy-group{background:var(--bg0);border-radius:var(--r-md);overflow:hidden;margin-bottom:6px}
+.assy-group-head{padding:7px 12px;background:var(--bg2);border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:8px;cursor:pointer}
+.assy-group-head:hover{background:var(--bg1)}
+.assy-group-body{padding:6px 8px}
+.exp-btn{padding:5px 14px;background:var(--bg2);border:0.5px solid var(--border2);border-radius:var(--r-md);font-size:11px;cursor:pointer;color:var(--t2)}
+.exp-btn.primary{background:var(--amber-bg);color:var(--amber);border-color:rgba(186,117,23,0.3);font-weight:500}
+</style>
+
+<div class="panel" id="tab-assembly-ux">
+  <h2>Assembly view — design &amp; spec</h2>
+  <p class="lead">AssemblyView.swift is currently a stub. This tab defines what it should look like and how it works before C3 builds it. The assembly view is SLATE's most visible value demonstration — it needs to be polished.</p>
+
+  <div class="note"><strong>Assembly logic:</strong> Narrative = best circled take per setup in scene order. If no circle, use highest-scoring take and flag amber. If no takes, mark gap. Documentary = circled clips per subject per topic, sorted by AI score.</div>
+
+  <!-- Assembly proto -->
+  <div class="proto-shell" style="margin-bottom:20px">
+    <div class="proto-topbar">
+      <div class="proto-logo">SL<span>A</span>TE</div>
+      <div style="font-size:12px;color:var(--t2);margin-left:8px">Assembly — Day 3 Rough Cut</div>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+        <span style="font-size:11px;color:var(--t3)">14 clips · 47:22</span>
+        <button class="exp-btn">⟳ Rebuild</button>
+        <button class="exp-btn">▶ Preview</button>
+        <button class="exp-btn primary">↗ Export</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 220px;height:380px">
+      <!-- Left: assembly list -->
+      <div style="overflow-y:auto;padding:12px;border-right:0.5px solid var(--border)">
+
+        <div class="assy-group">
+          <div class="assy-group-head">
+            <span style="font-size:11px;font-weight:500;color:var(--t2)">▾ Sc 01 — Kitchen</span>
+            <span style="font-size:10px;color:var(--t3)">4 setups · 5:42</span>
+            <span class="tag s" style="margin-left:auto;font-size:10px;padding:1px 6px">All covered</span>
+          </div>
+          <div class="assy-group-body">
+            <div class="assy-row"><div class="assy-dot" style="background:#1D9E75"></div><div class="assy-thumb">Proxy</div><div style="flex:1"><div class="assy-label">Setup A (Wide) · Take 3</div><div class="assy-meta">01:42 · Cam A+B · <span style="color:#1D9E75">Circled</span></div></div><div class="assy-tc">01:42</div></div>
+            <div class="assy-row"><div class="assy-dot" style="background:#1D9E75"></div><div class="assy-thumb">Proxy</div><div style="flex:1"><div class="assy-label">Setup B (CU Jane) · Take 2</div><div class="assy-meta">00:58 · Cam A · <span style="color:#1D9E75">Circled</span></div></div><div class="assy-tc">00:58</div></div>
+            <div class="assy-row warn"><div class="assy-dot" style="background:#BA7517"></div><div class="assy-thumb">Proxy</div><div style="flex:1"><div class="assy-label">Setup C (OTS) · Take 4 <span style="font-size:10px;color:var(--warn-t)">— auto-selected</span></div><div class="assy-meta">01:12 · Cam A · <span style="color:var(--warn-t)">No circle — best available</span></div></div><div class="assy-tc">01:12</div></div>
+          </div>
+        </div>
+
+        <div class="assy-group">
+          <div class="assy-group-head">
+            <span style="font-size:11px;font-weight:500;color:var(--t2)">▸ Sc 02 — Hallway</span>
+            <span style="font-size:10px;color:var(--t3)">2 setups · 3:18</span>
+            <span class="tag w" style="margin-left:auto;font-size:10px;padding:1px 6px">1 uncircled</span>
+          </div>
+        </div>
+
+        <div class="assy-group">
+          <div class="assy-group-head">
+            <span style="font-size:11px;font-weight:500;color:var(--t2)">▸ Sc 03 — Ext. Street</span>
+            <span style="font-size:10px;color:var(--t3)">5 setups · 12:44</span>
+            <span class="tag d" style="margin-left:auto;font-size:10px;padding:1px 6px">3 gaps</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right: export panel -->
+      <div style="padding:14px;overflow-y:auto">
+        <div style="font-size:11px;font-weight:500;color:var(--t2);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.06em;font-size:10px">Export format</div>
+        <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:14px">
+          <div style="padding:7px 10px;background:var(--amber-bg);border:0.5px solid rgba(186,117,23,0.3);border-radius:var(--r-md);font-size:11px;font-weight:500;color:var(--amber);cursor:pointer">● FCPXML</div>
+          <div style="padding:7px 10px;background:none;border:0.5px solid var(--border);border-radius:var(--r-md);font-size:11px;color:var(--t2);cursor:pointer">○ Avid AAF + EDL</div>
+          <div style="padding:7px 10px;background:none;border:0.5px solid var(--border);border-radius:var(--r-md);font-size:11px;color:var(--t2);cursor:pointer">○ Premiere XML</div>
+          <div style="padding:7px 10px;background:none;border:0.5px solid var(--border);border-radius:var(--r-md);font-size:11px;color:var(--t2);cursor:pointer">○ Resolve XML</div>
+        </div>
+        <div style="padding:10px;background:var(--bg0);border:0.5px solid var(--border);border-radius:var(--r-md);margin-bottom:10px">
+          <div style="font-size:11px;color:var(--t2);margin-bottom:6px">On export:</div>
+          <label style="display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--t2);margin-bottom:5px;cursor:pointer"><input type="checkbox" checked style="margin-top:1px"> Auto-generate review link</label>
+          <label style="display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--t2);cursor:pointer"><input type="checkbox" checked style="margin-top:1px"> Send to director via iMessage</label>
+        </div>
+        <div style="font-size:11px;color:var(--t3);margin-bottom:4px">Director notification target:</div>
+        <div style="background:var(--bg0);border:0.5px solid var(--border2);border-radius:var(--r-md);padding:7px 10px;font-size:12px;color:var(--t2);margin-bottom:10px">Sarah C. (Dir) · +1 310 555 0192</div>
+        <button class="exp-btn primary" style="width:100%">↗ Export + Send</button>
+      </div>
+    </div>
+  </div>
+
+  <h3>Assembly logic — both modes</h3>
+  <div class="decision-grid">
+    <div class="decision-card">
+      <div class="dc-head n">Narrative assembly</div>
+      <div class="dc-body">
+        <ul>
+          <li>Iterate scenes in scene-number order</li>
+          <li>For each setup: use highest-scoring circled take</li>
+          <li>No circle → use highest AI score, flag amber "auto-selected"</li>
+          <li>No takes → mark red "missing coverage", continue</li>
+          <li>Assembly = ordered array of Clip references + gaps</li>
+        </ul>
+      </div>
+    </div>
+    <div class="decision-card">
+      <div class="dc-head d">Documentary assembly</div>
+      <div class="dc-body">
+        <ul>
+          <li>Group clips by subject</li>
+          <li>Within each subject, group by topic tag</li>
+          <li>Circled clips → include all; flagged → include, mark review</li>
+          <li>Sort within topic by AI content score</li>
+          <li>B-roll appended after each subject block</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="note"><strong>Auto-share on export:</strong> When the export button is pressed, SLATE immediately calls <code>generate-share-link</code> and fires <code>NotificationService.deliver()</code> without requiring the DIT to do anything extra. The "sent" status appears in the status bar within 5 seconds.</div>
+</div>
+
+<script>
+// Add new tab IDs to showTab function
+const _origShowTab = window.showTab || function(id){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.getElementById('tab-'+id).classList.add('on');
+};
+window.showTab = function(id){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.shell-tab').forEach(t=>t.classList.remove('on'));
+  const panel = document.getElementById('tab-'+id);
+  if(panel) panel.classList.add('on');
+  event.target.classList.add('on');
+};
+</script>
+
+</body>
+</html>

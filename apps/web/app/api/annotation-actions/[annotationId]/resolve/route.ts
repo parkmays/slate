@@ -1,0 +1,63 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createServerSupabaseClient } from '@/lib/supabase'
+import {
+  ReviewRouteError,
+  broadcastClipEvent,
+  requireClipAccess,
+  requireShareLinkAccess,
+  setAnnotationResolved,
+} from '@/lib/review-server'
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { annotationId: string } }
+) {
+  try {
+    const body = await request.json()
+    const isResolved = body.isResolved !== false
+    const shareToken = request.headers.get('X-Share-Token') ?? body.shareToken
+
+    if (!params.annotationId) {
+      return NextResponse.json({ error: 'Missing annotationId' }, { status: 400 })
+    }
+    if (!shareToken || typeof shareToken !== 'string') {
+      return NextResponse.json({ error: 'Missing share token' }, { status: 401 })
+    }
+
+    const supabase = createServerSupabaseClient()
+    const shareLink = await requireShareLinkAccess(supabase, shareToken, request)
+    if (!shareLink.permissions.canComment) {
+      return NextResponse.json({ error: 'Commenting is not permitted for this share link' }, { status: 403 })
+    }
+
+    const { data: annotationRow, error: annotationError } = await supabase
+      .from('annotations')
+      .select('id, clip_id')
+      .eq('id', params.annotationId)
+      .single()
+
+    if (annotationError || !annotationRow) {
+      return NextResponse.json({ error: 'Annotation not found' }, { status: 404 })
+    }
+
+    await requireClipAccess(supabase, annotationRow.clip_id, shareLink)
+
+    const annotation = await setAnnotationResolved(supabase, params.annotationId, isResolved)
+
+    await broadcastClipEvent(supabase, annotationRow.clip_id, 'annotation_resolved', {
+      annotationId: params.annotationId,
+      resolvedAt: annotation.resolvedAt,
+      resolvedBy: 'share-token',
+      isResolved,
+    })
+
+    return NextResponse.json({ annotation })
+  } catch (error) {
+    if (error instanceof ReviewRouteError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
+
+    console.error('Annotation resolve error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
