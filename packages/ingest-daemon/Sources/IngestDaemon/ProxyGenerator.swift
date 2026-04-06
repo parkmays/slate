@@ -206,8 +206,12 @@ public actor ProxyGenerator {
             }
             
             // Start reader and writer
-            writer.startWriting()
-            reader.startReading()
+            guard writer.startWriting() else {
+                throw ProxyError.writingFailed(writer.error?.localizedDescription ?? "Failed to start AVAssetWriter")
+            }
+            guard reader.startReading() else {
+                throw ProxyError.writingFailed(reader.error?.localizedDescription ?? "Failed to start AVAssetReader")
+            }
             writer.startSession(atSourceTime: .zero)
             
             // Process video frames (mutable state lives in @unchecked Sendable boxes; each queue is serial).
@@ -235,45 +239,51 @@ public actor ProxyGenerator {
                 proxyHeight: proxyHeight
             )
             processingGroup.enter()
-            videoQueue.async { [videoState] in
+            // Must only append when `isReadyForMoreMediaData` is true; otherwise AVAssetWriterInput can throw (abort).
+            videoInput.requestMediaDataWhenReady(on: videoQueue) { [videoState] in
                 let state = videoState
-                while !state.finished {
+                while state.input.isReadyForMoreMediaData, !state.finished {
                     autoreleasepool {
-                        if let sampleBuffer = state.output.copyNextSampleBuffer() {
-                            let processedBuffer = LUTManager.applyProxyLUT(to: sampleBuffer, lut: state.lut) ?? sampleBuffer
-                            var bufferToAppend = processedBuffer
-                            if state.burnInConfig.enabled,
-                               let pb = CMSampleBufferGetImageBuffer(bufferToAppend) {
-                                let renderer = BurnInRenderer()
-                                let tc = renderer.timecodeString(
-                                    startTC: state.clip.sourceTimecodeStart,
-                                    frameNumber: state.frameCount,
-                                    fps: state.clip.sourceFps
-                                )
-                                let meta = ProxyGenerator.buildMetadataLine(clip: state.clip)
-                                if let burned = renderer.renderBurnIn(
-                                    pixelBuffer: pb,
-                                    timecodeString: tc,
-                                    metadataLine: meta,
-                                    config: state.burnInConfig,
-                                    outputWidth: state.proxyWidth,
-                                    outputHeight: state.proxyHeight
-                                ),
-                                let rebuilt = LUTManager.sampleBuffer(wrapping: burned, timingFrom: bufferToAppend) {
-                                    bufferToAppend = rebuilt
-                                }
-                            }
-                            if !state.input.append(bufferToAppend) {
-                                print("Failed to append video sample")
-                            }
-                            state.frameCount += 1
-                            let progress = Double(state.frameCount) / Double(state.totalFrames)
-                            print("Proxy progress for \(state.clipId): \(progress * 100)%")
-                        } else {
+                        guard let sampleBuffer = state.output.copyNextSampleBuffer() else {
                             state.finished = true
                             state.input.markAsFinished()
                             processingGroup.leave()
+                            return
                         }
+                        let processedBuffer = LUTManager.applyProxyLUT(to: sampleBuffer, lut: state.lut) ?? sampleBuffer
+                        var bufferToAppend = processedBuffer
+                        if state.burnInConfig.enabled,
+                           let pb = CMSampleBufferGetImageBuffer(bufferToAppend) {
+                            let renderer = BurnInRenderer()
+                            let tc = renderer.timecodeString(
+                                startTC: state.clip.sourceTimecodeStart,
+                                frameNumber: state.frameCount,
+                                fps: state.clip.sourceFps
+                            )
+                            let meta = ProxyGenerator.buildMetadataLine(clip: state.clip)
+                            if let burned = renderer.renderBurnIn(
+                                pixelBuffer: pb,
+                                timecodeString: tc,
+                                metadataLine: meta,
+                                config: state.burnInConfig,
+                                outputWidth: state.proxyWidth,
+                                outputHeight: state.proxyHeight
+                            ),
+                               let rebuilt = LUTManager.sampleBuffer(wrapping: burned, timingFrom: bufferToAppend) {
+                                bufferToAppend = rebuilt
+                            }
+                        }
+                        guard state.input.append(bufferToAppend) else {
+                            print("Failed to append video sample")
+                            state.finished = true
+                            state.input.markAsFinished()
+                            processingGroup.leave()
+                            return
+                        }
+                        state.frameCount += 1
+                        // Reader-reported frame count can exceed nominal duration*fps by a frame; clamp for UI/logging.
+                        let progress = min(Double(state.frameCount) / Double(state.totalFrames), 1.0)
+                        print("Proxy progress for \(state.clipId): \(progress * 100)%")
                     }
                 }
             }
@@ -282,18 +292,22 @@ public actor ProxyGenerator {
             if let audioOutput = audioOutput, let audioWriterInput = audioInput {
                 let audioState = AudioEncodeState(output: audioOutput, input: audioWriterInput)
                 processingGroup.enter()
-                audioQueue.async { [audioState] in
+                audioWriterInput.requestMediaDataWhenReady(on: audioQueue) { [audioState] in
                     let state = audioState
-                    while !state.finished {
+                    while state.input.isReadyForMoreMediaData, !state.finished {
                         autoreleasepool {
-                            if let sampleBuffer = state.output.copyNextSampleBuffer() {
-                                if !state.input.append(sampleBuffer) {
-                                    print("Failed to append audio sample")
-                                }
-                            } else {
+                            guard let sampleBuffer = state.output.copyNextSampleBuffer() else {
                                 state.finished = true
                                 state.input.markAsFinished()
                                 processingGroup.leave()
+                                return
+                            }
+                            guard state.input.append(sampleBuffer) else {
+                                print("Failed to append audio sample")
+                                state.finished = true
+                                state.input.markAsFinished()
+                                processingGroup.leave()
+                                return
                             }
                         }
                     }

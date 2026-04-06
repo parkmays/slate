@@ -4,6 +4,84 @@ import SLATESharedTypes
 @testable import IngestDaemon
 
 final class IngestDaemonTests: XCTestCase {
+    func testProxyGenerationAgainstRRBugRenders() async throws {
+        guard ProcessInfo.processInfo.environment["RUN_RRBUG_PROXY_TESTS"] == "1" else {
+            throw XCTSkip("Set RUN_RRBUG_PROXY_TESTS=1 to run media integration test")
+        }
+
+        let mediaRoot = ProcessInfo.processInfo.environment["RRBUG_MEDIA_DIR"]
+            ?? "/Users/parker/Library/CloudStorage/Dropbox-NEA4/Parker Mays/RR BUG/RR BUG RENDERS"
+        let rootURL = URL(fileURLWithPath: mediaRoot, isDirectory: true)
+        var isDir: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDir))
+        XCTAssertTrue(isDir.boolValue, "RR BUG media path is not a directory: \(rootURL.path)")
+
+        let maxFiles = Int(ProcessInfo.processInfo.environment["RRBUG_MAX_FILES"] ?? "2") ?? 2
+        let supportedExts = Set(["mov", "mp4", "m4v", "mxf", "r3d", "ari", "arx", "braw"])
+        let files = try FileManager.default.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        .filter { supportedExts.contains($0.pathExtension.lowercased()) }
+        .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+        .prefix(maxFiles)
+
+        XCTAssertFalse(files.isEmpty, "No supported media files found under \(rootURL.path)")
+
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("slate-proxy-rrbug-\(UUID().uuidString).db")
+        let store = try GRDBStore(path: dbURL.path)
+        let generator = ProxyGenerator(dbQueue: try await store.dbQueue, grdbStore: store)
+
+        for fileURL in files {
+            let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+            let ext = fileURL.pathExtension.lowercased()
+            let format: SourceFormat = (ext == "mov") ? .proRes422HQ : .h264
+            let clip = Clip(
+                projectId: "rr-bug-integration",
+                checksum: UUID().uuidString.replacingOccurrences(of: "-", with: ""),
+                sourcePath: fileURL.path,
+                sourceSize: size,
+                sourceFormat: format,
+                sourceFps: 24,
+                sourceTimecodeStart: "00:00:00:00",
+                duration: 0,
+                proxyPath: nil,
+                proxyStatus: .pending,
+                proxyChecksum: nil,
+                narrativeMeta: .init(sceneNumber: fileURL.deletingPathExtension().lastPathComponent, shotCode: "A", takeNumber: 1, cameraId: "A"),
+                documentaryMeta: nil,
+                audioTracks: [],
+                syncResult: .unsynced,
+                syncedAudioPath: nil,
+                aiScores: nil,
+                transcriptId: nil,
+                aiProcessingStatus: .pending,
+                reviewStatus: .unreviewed,
+                annotations: [],
+                approvalStatus: .pending,
+                approvedBy: nil,
+                approvedAt: nil,
+                ingestedAt: ISO8601DateFormatter().string(from: Date()),
+                updatedAt: ISO8601DateFormatter().string(from: Date()),
+                projectMode: .narrative
+            )
+            try await store.saveClip(clip)
+
+            do {
+                try await generator.generateProxy(for: clip, burnInConfig: BurnInConfig())
+            } catch {
+                XCTFail("Proxy generation failed for \(fileURL.lastPathComponent): \(error)")
+            }
+
+            let persisted = try await store.getClip(byId: clip.id)
+            XCTAssertEqual(persisted?.proxyStatus, .ready, "Expected ready for \(fileURL.lastPathComponent)")
+            XCTAssertNotNil(persisted?.proxyPath, "Expected proxy path for \(fileURL.lastPathComponent)")
+        }
+    }
+
     func testBurnInTimecodeStringAdvancesByFrameRate() {
         let r = BurnInRenderer()
         XCTAssertEqual(r.timecodeString(startTC: "01:00:00:00", frameNumber: 0, fps: 24), "01:00:00:00")

@@ -44,7 +44,13 @@ enum AudioFileLoader {
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
         output.alwaysCopiesSampleData = false
         reader.add(output)
-        reader.startReading()
+        guard reader.startReading() else {
+            throw NSError(
+                domain: "SLATESyncEngine",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: reader.error?.localizedDescription ?? "Failed to start AVAssetReader"]
+            )
+        }
 
         var sampleRate = 48_000.0
         var channels = 1
@@ -61,10 +67,13 @@ enum AudioFileLoader {
         while let sampleBuffer = output.copyNextSampleBuffer() {
             guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
             let length = CMBlockBufferGetDataLength(blockBuffer)
+            guard length > 0 else { continue }
             var data = Data(count: length)
-            _ = data.withUnsafeMutableBytes { bytes in
-                CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: bytes.baseAddress!)
+            let status = data.withUnsafeMutableBytes { bytes in
+                guard let destination = bytes.baseAddress else { return kCMBlockBufferBadPointerParameterErr }
+                return CMBlockBufferCopyDataBytes(blockBuffer, atOffset: 0, dataLength: length, destination: destination)
             }
+            guard status == kCMBlockBufferNoErr else { continue }
             let frameCount = CMSampleBufferGetNumSamples(sampleBuffer)
             data.withUnsafeBytes { bytes in
                 let floatSamples = bytes.bindMemory(to: Float.self)

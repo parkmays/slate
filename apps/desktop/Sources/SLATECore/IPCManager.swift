@@ -54,12 +54,36 @@ public final class IPCManager: NSObject, ObservableObject, IngestClientXPCProtoc
     // MARK: - App → daemon
 
     func sendRegisterWatchFolder(_ config: WatchFolder) async -> Bool {
-        guard let proxy = connection?.remoteObjectProxyWithErrorHandler({ _ in }) as? IngestDaemonXPCProtocol else {
+        final class ReplyGate {
+            private let lock = NSLock()
+            private var continuation: CheckedContinuation<Bool, Never>?
+
+            init(_ continuation: CheckedContinuation<Bool, Never>) {
+                self.continuation = continuation
+            }
+
+            func resume(_ value: Bool) {
+                lock.lock()
+                let cont = continuation
+                continuation = nil
+                lock.unlock()
+                cont?.resume(returning: value)
+            }
+        }
+
+        guard let conn = connection else {
             return false
         }
         return await withCheckedContinuation { cont in
+            let gate = ReplyGate(cont)
+            guard let proxy = conn.remoteObjectProxyWithErrorHandler({ _ in
+                gate.resume(false)
+            }) as? IngestDaemonXPCProtocol else {
+                gate.resume(false)
+                return
+            }
             proxy.registerWatchFolder(config.toXPC()) { success in
-                cont.resume(returning: success)
+                gate.resume(success)
             }
         }
     }
