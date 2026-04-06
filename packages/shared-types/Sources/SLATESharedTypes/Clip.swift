@@ -287,6 +287,8 @@ public struct Annotation: Codable, Sendable, Equatable, Identifiable {
     public var source: String?
     /// HH:MM:SS:FF
     public var timecodeIn: String
+    /// Seconds from clip/proxy start — mirrors web/Postgres `time_offset_seconds` when synced from cloud review.
+    public var timeOffsetSeconds: Double?
     /// HH:MM:SS:FF — nil if point annotation
     public var timecodeOut: String?
     public var body: String
@@ -302,6 +304,7 @@ public struct Annotation: Codable, Sendable, Equatable, Identifiable {
         userId: String,
         userDisplayName: String,
         timecodeIn: String,
+        timeOffsetSeconds: Double? = nil,
         timecodeOut: String? = nil,
         body: String,
         type: AnnotationType = .text,
@@ -315,6 +318,7 @@ public struct Annotation: Codable, Sendable, Equatable, Identifiable {
         self.userDisplayName = userDisplayName
         self.source = source
         self.timecodeIn = timecodeIn
+        self.timeOffsetSeconds = timeOffsetSeconds
         self.timecodeOut = timecodeOut
         self.body = body
         self.type = type

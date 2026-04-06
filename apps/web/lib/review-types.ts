@@ -23,6 +23,8 @@ export interface ReviewAnnotation {
   userId: string
   userDisplayName: string
   timecodeIn: string
+  /** Seconds from clip/proxy start; aligned with DB `time_offset_seconds` and playback `currentTime`. */
+  timeOffsetSeconds?: number | null
   timecodeOut: string | null
   body: string
   type: AnnotationType

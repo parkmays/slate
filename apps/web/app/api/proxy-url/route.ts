@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { reviewAccessCookieName } from '@/lib/review-auth'
+import { getRequestClientIp } from '@/lib/request-ip'
+import {
+  checkReviewRateLimit,
+  rateLimitFingerprint,
+  rateLimitResponse,
+} from '@/lib/review-rate-limit'
 import { createServerSupabaseClient } from '@/lib/supabase'
 import {
   ReviewRouteError,
@@ -32,6 +38,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Supabase environment is not configured' }, { status: 500 })
     }
 
+    const ip = getRequestClientIp(request)
+    const proxyLimit = checkReviewRateLimit('proxy', rateLimitFingerprint(ip, shareToken))
+    if (!proxyLimit.ok) {
+      return rateLimitResponse(proxyLimit.retryAfterSeconds)
+    }
+
     const supabase = createServerSupabaseClient()
     const shareLink = await requireShareLinkAccess(supabase, shareToken, request)
     await requireClipAccess(supabase, clipId, shareLink)
@@ -50,11 +62,18 @@ export async function POST(request: NextRequest) {
     })
 
     const raw = await response.text()
-    const payload = raw ? JSON.parse(raw) : {}
+    let payload: Record<string, unknown> = {}
+    if (raw) {
+      try {
+        payload = JSON.parse(raw) as Record<string, unknown>
+      } catch {
+        return NextResponse.json({ error: 'Invalid upstream response' }, { status: 502 })
+      }
+    }
 
     if (!response.ok) {
       return NextResponse.json(
-        { error: payload.error ?? 'Failed to get proxy URL' },
+        { error: typeof payload.error === 'string' ? payload.error : 'Failed to get proxy URL' },
         { status: response.status }
       )
     }

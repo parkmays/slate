@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getRequestClientIp } from '@/lib/request-ip'
+import {
+  checkReviewRateLimit,
+  rateLimitFingerprint,
+  rateLimitResponse,
+} from '@/lib/review-rate-limit'
 import { createServerSupabaseClient } from '@/lib/supabase'
 import {
   ReviewRouteError,
@@ -21,6 +27,12 @@ async function updateClipStatus(
   }
   if (!shareToken || typeof shareToken !== 'string') {
     return NextResponse.json({ error: 'Missing share token' }, { status: 401 })
+  }
+
+  const ip = getRequestClientIp(request)
+  const statusLimit = checkReviewRateLimit('status', rateLimitFingerprint(ip, shareToken))
+  if (!statusLimit.ok) {
+    return rateLimitResponse(statusLimit.retryAfterSeconds)
   }
 
   const supabase = createServerSupabaseClient()

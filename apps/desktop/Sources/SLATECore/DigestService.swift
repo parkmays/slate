@@ -133,8 +133,18 @@ public actor DigestService {
     }
 
     fileprivate func handleDigestTimerFired(projectId: String, clipStore: GRDBClipStore) async {
+        guard let proj = await clipStore.project(byId: projectId),
+              proj.dailyDigestEnabled,
+              !proj.digestTargets.isEmpty
+        else {
+            await cancelDigestSchedule(forProjectId: projectId)
+            return
+        }
         await runScheduledDigest(projectId: projectId, clipStore: clipStore)
-        guard let proj = await clipStore.project(byId: projectId), proj.dailyDigestEnabled else {
+        guard let projAfter = await clipStore.project(byId: projectId),
+              projAfter.dailyDigestEnabled,
+              !projAfter.digestTargets.isEmpty
+        else {
             await cancelDigestSchedule(forProjectId: projectId)
             return
         }

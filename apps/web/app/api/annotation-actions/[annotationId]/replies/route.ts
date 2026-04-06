@@ -1,4 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { assertValidAnnotationTextBody, sanitizeReviewTextBody } from '@/lib/review-input-validation'
+import { getRequestClientIp } from '@/lib/request-ip'
+import {
+  checkReviewRateLimit,
+  rateLimitFingerprint,
+  rateLimitResponse,
+} from '@/lib/review-rate-limit'
 import { createServerSupabaseClient } from '@/lib/supabase'
 import {
   ReviewRouteError,
@@ -24,6 +31,14 @@ export async function POST(
       return NextResponse.json({ error: 'Missing share token' }, { status: 401 })
     }
 
+    const ip = getRequestClientIp(request)
+    const replyLimit = checkReviewRateLimit('reply', rateLimitFingerprint(ip, shareToken))
+    if (!replyLimit.ok) {
+      return rateLimitResponse(replyLimit.retryAfterSeconds)
+    }
+
+    assertValidAnnotationTextBody(sanitizeReviewTextBody(replyBody))
+
     const supabase = createServerSupabaseClient()
     const shareLink = await requireShareLinkAccess(supabase, shareToken, request)
     if (!shareLink.permissions.canComment) {
@@ -45,7 +60,7 @@ export async function POST(
     const reply = await createAnnotationReplyRecord(supabase, {
       annotationId: params.annotationId,
       authorName: 'Reviewer',
-      body: replyBody,
+      body: sanitizeReviewTextBody(replyBody),
     })
 
     await broadcastClipEvent(supabase, annotationRow.clip_id, 'annotation_reply_added', {

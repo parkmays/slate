@@ -44,6 +44,7 @@ function createSupabaseMock(options?: {
       author_id: 'share-token',
       author_name: 'Reviewer',
       timecode: '01:00:00:00',
+      time_offset_seconds: 3600,
       content: 'Needs alt take.',
       type: 'text',
       timestamp: '2026-03-31T12:00:00.000Z',
@@ -105,6 +106,8 @@ function createSupabaseMock(options?: {
                   data: {
                     id: 'clip-1',
                     project_id: 'project-1',
+                    duration_seconds: 100000,
+                    frame_rate: 24,
                     hierarchy: {
                       narrative: {
                         sceneId: 'scene-1',
@@ -119,6 +122,8 @@ function createSupabaseMock(options?: {
                 data: {
                   id: 'clip-1',
                   project_id: 'project-1',
+                  duration_seconds: 100000,
+                  frame_rate: 24,
                   hierarchy: {
                     narrative: {
                       sceneId: 'scene-1',
@@ -342,6 +347,7 @@ describe('review routes', () => {
         userId: 'share-token',
         userDisplayName: 'Reviewer',
         timecodeIn: '01:00:00:00',
+        timeOffsetSeconds: 3600,
         timecodeOut: null,
         body: 'Needs alt take.',
         type: 'text',
@@ -352,6 +358,36 @@ describe('review routes', () => {
         mentions: [],
         replies: [],
       },
+    })
+  })
+
+  it('rejects annotations when timecode is outside clip duration', async () => {
+    const supabaseMock = createSupabaseMock({
+      clip: {
+        duration_seconds: 10,
+        frame_rate: 24,
+      },
+    })
+    vi.mocked(createServerSupabaseClient).mockReturnValue(supabaseMock as never)
+
+    const response = await annotationsPost(
+      makeRequest(
+        '/api/annotations',
+        'POST',
+        {
+          clipId: 'clip-1',
+          timecodeIn: '00:01:00:00',
+          type: 'text',
+          body: 'Too late in the clip.',
+          shareToken: 'valid-share-token',
+        },
+        { 'X-Share-Token': 'valid-share-token' }
+      )
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Timecode is outside clip duration',
     })
   })
 

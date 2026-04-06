@@ -25,6 +25,7 @@ import { secondsToTimecode } from '@/lib/timecode'
 
 interface PageProps {
   params: { token: string }
+  searchParams?: { clip?: string; t?: string }
 }
 
 function ReviewAccessState({
@@ -265,11 +266,13 @@ function buildGroupedClipIds(clips: ReviewClip[]): Record<string, string[]> {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const shareLink = await loadReviewShareLink(params.token)
-  if (!shareLink) {
-    return {
-      title: 'Review Link Unavailable - SLATE',
-      description: 'This review link is no longer available.',
-    }
+  const unavailable = {
+    title: 'Review Link Unavailable - SLATE',
+    description: 'This review link is no longer available.',
+  } as const
+
+  if (!shareLink || isLinkRevoked(shareLink) || new Date(shareLink.expires_at) < new Date()) {
+    return unavailable
   }
 
   return {
@@ -300,6 +303,7 @@ async function getProjectData(shareLink: ReviewShareLink): Promise<ReviewProject
         .from('annotations')
         .select('*')
         .in('clip_id', clipIds)
+        .order('time_offset_seconds', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true })
 
   const annotationIds = (annotationRows ?? []).map((row) => row.id)
@@ -346,7 +350,7 @@ async function getProjectData(shareLink: ReviewShareLink): Promise<ReviewProject
   }
 }
 
-export default async function ReviewPage({ params }: PageProps) {
+export default async function ReviewPage({ params, searchParams }: PageProps) {
   const shareLinkData = await loadReviewShareLink(params.token)
 
   if (!shareLinkData) {
@@ -407,11 +411,21 @@ export default async function ReviewPage({ params }: PageProps) {
 
   const projectData = await getProjectData(hydratedShareLink)
 
+  const initialClipId = typeof searchParams?.clip === 'string' && searchParams.clip.trim().length > 0
+    ? searchParams.clip.trim()
+    : null
+  const initialTimeParam = searchParams?.t
+  const initialTimeSeconds = typeof initialTimeParam === 'string' && initialTimeParam.trim().length > 0
+    ? Number.parseFloat(initialTimeParam)
+    : null
+
   return (
     <ReviewClient
       shareLink={hydratedShareLink}
       projectData={projectData}
       token={params.token}
+      initialClipId={initialClipId}
+      initialTimeSeconds={initialTimeSeconds != null && Number.isFinite(initialTimeSeconds) ? initialTimeSeconds : null}
     />
   )
 }

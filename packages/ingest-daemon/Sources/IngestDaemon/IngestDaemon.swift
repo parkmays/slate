@@ -174,7 +174,7 @@ public actor IngestPipeline {
         proxyClip.audioTracks = audioTracks
         proxyClip.syncResult = syncResult
         proxyClip.syncedAudioPath = syncedAudioPath
-        let proxyGenerator = ProxyGenerator(dbQueue: try await store.dbQueue)
+        let proxyGenerator = ProxyGenerator(dbQueue: try await store.dbQueue, grdbStore: store)
         let burnIn = watchConfig.burnInConfig ?? BurnInConfig()
         try await proxyGenerator.generateProxy(for: proxyClip, burnInConfig: burnIn)
 

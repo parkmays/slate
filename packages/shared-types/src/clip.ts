@@ -114,6 +114,8 @@ export interface Annotation {
   source?: string | null;
   /** HH:MM:SS:FF */
   timecodeIn: string;
+  /** Seconds from clip/proxy start; mirrors Postgres `annotations.time_offset_seconds`. */
+  timeOffsetSeconds?: number | null;
   /** HH:MM:SS:FF — null if point annotation */
   timecodeOut: string | null;
   body: string;

@@ -5,12 +5,15 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
+import { timecodeToSeconds } from '@/lib/timecode'
 import { cn, getAnnotationColor, getAnnotationIcon } from '@/lib/utils'
 import type { Annotation, AnnotationType } from '@/types'
 
 interface AnnotationPanelProps {
   annotations: Annotation[]
   currentTimecode: string
+  /** Used to sort notes by timeline position when `timeOffsetSeconds` is absent (legacy rows). */
+  annotationSortFps?: number
   permissions: {
     canComment: boolean
   }
@@ -51,6 +54,7 @@ function renderMentionText(body: string): React.ReactNode {
 export function AnnotationPanel({
   annotations,
   currentTimecode,
+  annotationSortFps = 24,
   permissions,
   onAddAnnotation,
   onReply,
@@ -82,10 +86,21 @@ export function AnnotationPanel({
       ? annotations
       : annotations.filter((annotation) => annotation.type === filter)
 
-    return [...visible].sort((left, right) =>
-      left.timecodeIn.localeCompare(right.timecodeIn)
-    )
-  }, [annotations, filter])
+    const sortKey = (annotation: Annotation) => {
+      if (typeof annotation.timeOffsetSeconds === 'number' && Number.isFinite(annotation.timeOffsetSeconds)) {
+        return annotation.timeOffsetSeconds
+      }
+      return timecodeToSeconds(annotation.timecodeIn, annotationSortFps)
+    }
+
+    return [...visible].sort((left, right) => {
+      const delta = sortKey(left) - sortKey(right)
+      if (delta !== 0) {
+        return delta
+      }
+      return left.timecodeIn.localeCompare(right.timecodeIn)
+    })
+  }, [annotations, annotationSortFps, filter])
 
   async function handleSubmit() {
     const trimmed = draft.trim()

@@ -6,7 +6,7 @@
 //  2. ReviewStatus canonical cases all have non-empty display names
 //  3. IngestStage canonical cases cover .checksum…complete and .error
 //  4. ProjectStatistics.empty has the correct zero values
-//  5. Annotation canonical fields compile (i.e. `userDisplayName`, `body`, `timecodeIn`)
+//  5. Annotation canonical fields compile (i.e. `userDisplayName`, `body`, `timecodeIn`, `timeOffsetSeconds`)
 //
 // These tests run against an in-memory temp database — no network, no daemon.
 

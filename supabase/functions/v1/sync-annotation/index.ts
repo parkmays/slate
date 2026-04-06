@@ -25,10 +25,15 @@ interface ShareLinkRecord {
   scope: 'project' | 'scene' | 'subject' | 'assembly'
   scope_id: string | null
   password_hash: string | null
+  revoked_at: string | null
   permissions: {
     canComment?: boolean
   }
 }
+
+/** Keep in sync with MAX_REVIEW_TEXT_CHARS in apps/web/lib/review-input-validation.ts */
+const MAX_ANNOTATION_CONTENT_CHARS = 8000
+const MAX_SHARE_AUTHOR_NAME_CHARS = 120
 
 const VALID_ANNOTATION_TYPES = new Set<AnnotationInputType>(['text', 'voice'])
 
@@ -203,6 +208,10 @@ serve(async (req) => {
       return errorResponse(400, 'Missing required fields: clipId, timecode, content', 'missing_fields')
     }
 
+    if (content.length > MAX_ANNOTATION_CONTENT_CHARS) {
+      return errorResponse(400, 'Annotation content is too long', 'content_too_long')
+    }
+
     const timecodeRegex = /^\d{2}:\d{2}:\d{2}[:;]\d{2}$/
     if (!timecodeRegex.test(timecode)) {
       return errorResponse(400, 'Invalid timecode format — expected HH:MM:SS:FF', 'invalid_timecode')
@@ -221,12 +230,15 @@ serve(async (req) => {
     if (shareToken) {
       const { data: shareLink, error: shareError } = await supabase
         .from('share_links')
-        .select('id, project_id, expires_at, scope, scope_id, password_hash, permissions')
+        .select('id, project_id, expires_at, scope, scope_id, password_hash, revoked_at, permissions')
         .eq('token', shareToken)
         .single<ShareLinkRecord>()
 
       if (shareError || !shareLink) {
         return errorResponse(404, 'Invalid or expired share link', 'invalid_share_token')
+      }
+      if (shareLink.revoked_at) {
+        return errorResponse(410, 'Share link has been revoked', 'share_link_revoked')
       }
       if (new Date(shareLink.expires_at) < new Date()) {
         return errorResponse(410, 'Share link has expired', 'share_link_expired')
@@ -241,7 +253,10 @@ serve(async (req) => {
 
       projectId = shareLink.project_id
       canComment = Boolean(shareLink.permissions?.canComment)
-      authorName = providedAuthorName || 'Anonymous Reviewer'
+      {
+        const raw = (providedAuthorName ?? '').trim()
+        authorName = (raw.length > 0 ? raw : 'Anonymous Reviewer').slice(0, MAX_SHARE_AUTHOR_NAME_CHARS)
+      }
       scopedShareLink = shareLink
     } else {
       const token = authHeader!.replace('Bearer ', '')

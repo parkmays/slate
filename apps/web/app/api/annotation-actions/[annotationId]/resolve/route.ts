@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getRequestClientIp } from '@/lib/request-ip'
+import {
+  checkReviewRateLimit,
+  rateLimitFingerprint,
+  rateLimitResponse,
+} from '@/lib/review-rate-limit'
 import { createServerSupabaseClient } from '@/lib/supabase'
 import {
   ReviewRouteError,
@@ -22,6 +28,12 @@ export async function POST(
     }
     if (!shareToken || typeof shareToken !== 'string') {
       return NextResponse.json({ error: 'Missing share token' }, { status: 401 })
+    }
+
+    const ip = getRequestClientIp(request)
+    const resolveLimit = checkReviewRateLimit('resolve', rateLimitFingerprint(ip, shareToken))
+    if (!resolveLimit.ok) {
+      return rateLimitResponse(resolveLimit.retryAfterSeconds)
     }
 
     const supabase = createServerSupabaseClient()

@@ -11,7 +11,6 @@ import Foundation
 @preconcurrency import AVFoundation
 import VideoToolbox
 import GRDB
-import SLATEAIPipeline
 import SLATESharedTypes
 
 // Reader/writer objects are used only on their dedicated serial queues.
@@ -64,11 +63,14 @@ private final class AudioEncodeState: @unchecked Sendable {
 
 public actor ProxyGenerator {
     private let dbQueue: DatabaseQueue
+    /// Must be the same `GRDBStore` instance as the ingest pipeline so R2 completion updates the correct database (not `GRDBStore.shared` when using a custom DB path).
+    private let grdbStore: GRDBStore
     private let r2Uploader = R2Uploader()
     private var processingQueue: [String: Task<Void, Error>] = [:]
-    
-    public init(dbQueue: DatabaseQueue) {
+
+    public init(dbQueue: DatabaseQueue, grdbStore: GRDBStore) {
         self.dbQueue = dbQueue
+        self.grdbStore = grdbStore
     }
     
     /// Generate proxy for a clip
@@ -335,10 +337,7 @@ public actor ProxyGenerator {
             )
 
             await uploadProxyToR2(clip: clip, proxyURL: proxyURL, playlistURL: playlistURL)
-            
-            // Trigger next steps
-            await triggerSyncAndAI(clip: clip)
-            
+
         } catch {
             // Update status to error
             try? await updateClipStatus(clipId: clip.id, status: .error)
@@ -456,16 +455,9 @@ public actor ProxyGenerator {
         }
 
         do {
-            try await GRDBStore.shared.markProxyUploaded(clipId: clip.id, publicURL: publicMP4)
+            try await grdbStore.markProxyUploaded(clipId: clip.id, publicURL: publicMP4)
         } catch {
             print("[ProxyGenerator] R2 objects uploaded but GRDB markProxyUploaded failed for \(clip.id): \(error)")
-        }
-    }
-
-    private func triggerSyncAndAI(clip: Clip) async {
-        // Fire AI scoring as a non-blocking background task (stays on this actor; no detached hop).
-        Task(priority: .background) {
-            await self.performAIScoring(clip: clip)
         }
     }
 
@@ -478,29 +470,6 @@ public actor ProxyGenerator {
         case .documentary:
             guard let d = clip.documentaryMeta else { return "" }
             return "SUBJECT: \(d.subjectName) — \(d.sessionLabel)"
-        }
-    }
-
-    private func performAIScoring(clip: Clip) async {
-        do {
-            let scores = try await AIPipeline().scoreClip(clip)
-            try await dbQueue.write { db in
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = .sortedKeys
-                let scoresJSON = (try? encoder.encode(scores)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                let now = ISO8601DateFormatter().string(from: Date())
-                try db.execute(
-                    sql: """
-                        UPDATE clips
-                        SET ai_scores = ?, ai_processing_status = 'ready', updated_at = ?
-                        WHERE id = ?
-                    """,
-                    arguments: [scoresJSON, now, clip.id]
-                )
-            }
-            print("[ProxyGenerator] AI scoring complete for \(clip.id). Composite: \(scores.composite)")
-        } catch {
-            print("[ProxyGenerator] AI scoring failed for \(clip.id): \(error)")
         }
     }
 }

@@ -1,12 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  assertValidAnnotationTextBody,
+  assertValidTimecodeIn,
+  assertValidVoicePayload,
+  sanitizeReviewTextBody,
+} from '@/lib/review-input-validation'
+import { getRequestClientIp } from '@/lib/request-ip'
+import {
+  checkReviewRateLimit,
+  rateLimitFingerprint,
+  rateLimitResponse,
+} from '@/lib/review-rate-limit'
 import { createServerSupabaseClient } from '@/lib/supabase'
 import {
   ReviewRouteError,
+  assertAnnotationTimeOffsetAllowed,
   broadcastClipEvent,
+  clipPlaybackBounds,
   createAnnotationRecord,
   isAnnotationType,
   requireClipAccess,
   requireShareLinkAccess,
+  resolveAnnotationTimeOffsetSeconds,
 } from '@/lib/review-server'
 
 export async function POST(request: NextRequest) {
@@ -37,19 +52,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing share token' }, { status: 401 })
     }
 
+    const ip = getRequestClientIp(request)
+    const annotateLimit = checkReviewRateLimit('annotate', rateLimitFingerprint(ip, shareToken))
+    if (!annotateLimit.ok) {
+      return rateLimitResponse(annotateLimit.retryAfterSeconds)
+    }
+
+    assertValidTimecodeIn(timecodeIn!)
+
     const supabase = createServerSupabaseClient()
     const shareLink = await requireShareLinkAccess(supabase, shareToken, request)
     if (!shareLink.permissions.canComment) {
       return NextResponse.json({ error: 'Commenting is not permitted for this share link' }, { status: 403 })
     }
 
-    await requireClipAccess(supabase, clipId, shareLink)
+    const clip = await requireClipAccess(supabase, clipId, shareLink)
+    const { durationSeconds } = clipPlaybackBounds(clip)
+    const timeOffsetSeconds = resolveAnnotationTimeOffsetSeconds(timecodeIn, clip)
+    assertAnnotationTimeOffsetAllowed(timeOffsetSeconds, durationSeconds)
+
+    if (annotationType === 'voice') {
+      assertValidVoicePayload(voiceUrl!)
+    } else {
+      assertValidAnnotationTextBody(sanitizeReviewTextBody(annotationBody))
+    }
 
     const annotation = await createAnnotationRecord(supabase, {
       clipId,
       authorName: 'Reviewer',
-      body: annotationBody,
+      body: annotationType === 'voice' ? '' : sanitizeReviewTextBody(annotationBody),
       timecodeIn,
+      timeOffsetSeconds,
       type: annotationType,
       voiceUrl,
     })

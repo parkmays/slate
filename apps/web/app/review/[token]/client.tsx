@@ -41,6 +41,8 @@ interface ReviewClientProps {
   shareLink: ReviewShareLink
   projectData: ReviewProjectData
   token: string
+  initialClipId?: string | null
+  initialTimeSeconds?: number | null
 }
 
 function annotationMatches(left: ReviewAnnotation, right: ReviewAnnotation): boolean {
@@ -138,6 +140,7 @@ function VideoPlayer({
   fps,
   onTimeUpdate,
   seekTo,
+  timecodeLabel,
   playerId = 'primary',
   muted = false,
 }: {
@@ -146,6 +149,8 @@ function VideoPlayer({
   fps: number
   onTimeUpdate: (time: number) => void
   seekTo?: number | null
+  /** When set, drives the burn-in overlay (keeps display in sync with parent playback state). */
+  timecodeLabel?: string
   playerId?: 'primary' | 'compare'
   muted?: boolean
 }) {
@@ -300,7 +305,7 @@ function VideoPlayer({
       />
 
       <div className="pointer-events-none absolute bottom-12 right-3 rounded bg-black/70 px-2 py-1 text-xs font-mono text-white">
-        {secondsToTimecode(videoRef.current?.currentTime ?? 0, fps)}
+        {timecodeLabel ?? secondsToTimecode(videoRef.current?.currentTime ?? 0, fps)}
       </div>
     </div>
   )
@@ -495,7 +500,13 @@ function AssemblyPanel({
   )
 }
 
-export default function ReviewClient({ shareLink, projectData, token }: ReviewClientProps) {
+export default function ReviewClient({
+  shareLink,
+  projectData,
+  token,
+  initialClipId = null,
+  initialTimeSeconds = null,
+}: ReviewClientProps) {
   const [supabase] = useState(() => createBrowserSupabaseClient())
   const [clips, setClips] = useState<ReviewClip[]>(projectData.clips)
   const [selectedClipId, setSelectedClipId] = useState<string | null>(projectData.clips[0]?.id ?? null)
@@ -513,6 +524,7 @@ export default function ReviewClient({ shareLink, projectData, token }: ReviewCl
   const [presence, setPresence] = useState<Record<string, ReviewPresenceUser>>({})
   const viewerIdRef = useRef(`reviewer-${crypto.randomUUID()}`)
   const viewerNameRef = useRef(`Reviewer ${shareLink.token.slice(0, 4)}`)
+  const deepLinkAppliedRef = useRef(false)
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null
   const compareClip = useMemo(() => {
@@ -669,16 +681,54 @@ export default function ReviewClient({ shareLink, projectData, token }: ReviewCl
     }
   }, [selectedClipId, supabase])
 
-  const selectClip = useCallback((clipId: string) => {
+  const selectClip = useCallback((clipId: string, options?: { seekSeconds?: number | null }) => {
     startTransition(() => {
       setSelectedClipId(clipId)
       setSelectedAnnotationId(null)
-      setCurrentTime(0)
-      setSeekTo(0)
+      const seek = options?.seekSeconds
+      if (seek != null && Number.isFinite(seek)) {
+        const t = Math.max(0, seek)
+        setCurrentTime(t)
+        setSeekTo(t)
+      } else {
+        setCurrentTime(0)
+        setSeekTo(0)
+      }
       setAnnotationError(null)
       setAlternateMessage(null)
     })
   }, [])
+
+  useEffect(() => {
+    if (deepLinkAppliedRef.current) {
+      return
+    }
+    if (!initialClipId) {
+      return
+    }
+    const clip = projectData.clips.find((c) => c.id === initialClipId)
+    if (!clip) {
+      return
+    }
+    deepLinkAppliedRef.current = true
+    selectClip(initialClipId, {
+      seekSeconds: initialTimeSeconds != null && Number.isFinite(initialTimeSeconds) ? initialTimeSeconds : null,
+    })
+  }, [initialClipId, initialTimeSeconds, projectData.clips, selectClip])
+
+  const handleCopyLinkAtTime = useCallback(async () => {
+    if (!selectedClip || typeof window === 'undefined') {
+      return
+    }
+    const url = new URL(`/review/${token}`, window.location.origin)
+    url.searchParams.set('clip', selectedClip.id)
+    url.searchParams.set('t', String(Math.max(0, currentTime)))
+    try {
+      await navigator.clipboard.writeText(url.toString())
+    } catch {
+      // Clipboard may be unavailable (permissions / non-secure context).
+    }
+  }, [selectedClip, token, currentTime])
 
   const handleSeek = useCallback((seconds: number) => {
     setCurrentTime(seconds)
@@ -707,6 +757,7 @@ export default function ReviewClient({ shareLink, projectData, token }: ReviewCl
       userId: 'share-token',
       userDisplayName: 'Reviewer',
       timecodeIn: currentTimecode,
+      timeOffsetSeconds: currentTime,
       timecodeOut: null,
       body,
       type,
@@ -768,7 +819,7 @@ export default function ReviewClient({ shareLink, projectData, token }: ReviewCl
     } finally {
       setIsPostingAnnotation(false)
     }
-  }, [currentTimecode, selectedClip, token])
+  }, [currentTime, currentTimecode, selectedClip, token])
 
   const handleReply = useCallback(async (annotationId: string, body: string) => {
     if (!selectedClip) {
@@ -1236,6 +1287,7 @@ export default function ReviewClient({ shareLink, projectData, token }: ReviewCl
                       fps={selectedClip.sourceFps}
                       onTimeUpdate={setCurrentTime}
                       seekTo={seekTo}
+                      timecodeLabel={currentTimecode}
                       playerId="primary"
                     />
                   </div>
@@ -1254,6 +1306,7 @@ export default function ReviewClient({ shareLink, projectData, token }: ReviewCl
                       fps={compareClip.sourceFps}
                       onTimeUpdate={() => {}}
                       seekTo={seekTo}
+                      timecodeLabel={currentTimecode}
                       playerId="compare"
                       muted
                     />
@@ -1266,12 +1319,20 @@ export default function ReviewClient({ shareLink, projectData, token }: ReviewCl
                   fps={selectedClip.sourceFps}
                   onTimeUpdate={setCurrentTime}
                   seekTo={seekTo}
+                  timecodeLabel={currentTimecode}
                   playerId="primary"
                 />
               )}
 
               <div className="mt-4 flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-3">
                 <span className="text-xs font-mono text-zinc-500">{currentTimecode}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleCopyLinkAtTime()}
+                  className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800"
+                >
+                  Copy link at time
+                </button>
                 <div className="flex-1" />
                 <StatusBadge status={selectedClip.reviewStatus} />
               </div>
@@ -1356,6 +1417,7 @@ export default function ReviewClient({ shareLink, projectData, token }: ReviewCl
                     <AnnotationPanel
                       annotations={selectedClip.annotations}
                       currentTimecode={currentTimecode}
+                      annotationSortFps={selectedClip.sourceFps}
                       permissions={{ canComment: shareLink.permissions.canComment }}
                       onAddAnnotation={handleAddAnnotation}
                       onReply={handleReply}

@@ -30,6 +30,7 @@ export async function GET(
       .from('annotations')
       .select('*')
       .eq('clip_id', params.clipId)
+      .order('time_offset_seconds', { ascending: true, nullsFirst: false })
       .order('created_at', { ascending: true })
 
     if (annotationError) {

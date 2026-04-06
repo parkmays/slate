@@ -20,6 +20,7 @@ interface ShareLinkRecord {
   scope: 'project' | 'scene' | 'subject' | 'assembly'
   scope_id: string | null
   password_hash: string | null
+  revoked_at: string | null
 }
 
 interface ClipRecord {
@@ -225,12 +226,16 @@ serve(async (req) => {
     if (shareToken) {
       const { data: shareLink, error: shareError } = await supabase
         .from('share_links')
-        .select('id, project_id, expires_at, view_count, scope, scope_id, password_hash')
+        .select('id, project_id, expires_at, view_count, scope, scope_id, password_hash, revoked_at')
         .eq('token', shareToken)
         .single<ShareLinkRecord>()
 
       if (shareError || !shareLink) {
         return errorResponse(404, 'Invalid or expired share link', 'invalid_share_token')
+      }
+
+      if (shareLink.revoked_at) {
+        return errorResponse(410, 'Share link has been revoked', 'share_link_revoked')
       }
 
       if (new Date(shareLink.expires_at) < new Date()) {

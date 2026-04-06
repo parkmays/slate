@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { hasValidReviewAccessCookie, reviewAccessCookieName } from '@/lib/review-auth'
+import { timecodeToSeconds } from '@/lib/timecode'
 import type {
   AnnotationType,
   ReviewAnnotation,
@@ -50,6 +51,8 @@ interface ClipAccessRecord {
   id: string
   project_id: string
   hierarchy?: Record<string, unknown> | null
+  duration_seconds?: number | string | null
+  frame_rate?: number | string | null
 }
 
 interface RequestCookieReader {
@@ -191,6 +194,51 @@ export function normalizeAnnotationReply(record: Record<string, unknown>): Revie
   }
 }
 
+function parseTimeOffsetSeconds(record: Record<string, unknown>): number | null {
+  const raw = record.time_offset_seconds ?? record.timeOffsetSeconds
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return raw
+  }
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    const n = Number.parseFloat(raw)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+export function clipPlaybackBounds(
+  clip: Pick<ClipAccessRecord, 'duration_seconds' | 'frame_rate'>
+): { durationSeconds: number; fps: number } {
+  const durationSeconds = Math.max(0, Number(clip.duration_seconds ?? 0))
+  const fpsRaw = Number(clip.frame_rate ?? 24)
+  const fps = Number.isFinite(fpsRaw) && fpsRaw > 0 ? fpsRaw : 24
+  return { durationSeconds, fps }
+}
+
+export function assertAnnotationTimeOffsetAllowed(
+  timeOffsetSeconds: number,
+  durationSeconds: number
+): void {
+  if (!Number.isFinite(timeOffsetSeconds)) {
+    throw new ReviewRouteError('Invalid timecode', 400)
+  }
+  if (timeOffsetSeconds < -0.02) {
+    throw new ReviewRouteError('Timecode is before clip start', 400)
+  }
+  const upper = (durationSeconds > 0 ? durationSeconds : 0) + 0.5
+  if (timeOffsetSeconds > upper) {
+    throw new ReviewRouteError('Timecode is outside clip duration', 400)
+  }
+}
+
+export function resolveAnnotationTimeOffsetSeconds(
+  timecodeIn: string,
+  clip: Pick<ClipAccessRecord, 'duration_seconds' | 'frame_rate'>
+): number {
+  const { fps } = clipPlaybackBounds(clip)
+  return timecodeToSeconds(timecodeIn, fps)
+}
+
 export function normalizeAnnotation(record: Record<string, unknown>): ReviewAnnotation {
   const type = normalizeAnnotationType(record.type)
   const voiceUrl = annotationVoiceUrl(record, type)
@@ -207,6 +255,7 @@ export function normalizeAnnotation(record: Record<string, unknown>): ReviewAnno
     userId: stringValue(record.author_id, record.user_id, record.userId) ?? 'share-token',
     userDisplayName: stringValue(record.author_name, record.user_display_name, record.userDisplayName) ?? 'Reviewer',
     timecodeIn: stringValue(record.timecode, record.timecode_in, record.timecodeIn) ?? '00:00:00:00',
+    timeOffsetSeconds: parseTimeOffsetSeconds(record),
     timecodeOut: stringValue(record.timecode_out, record.timecodeOut) ?? null,
     body: type === 'voice' ? (stringValue(record.voice_transcript) ?? '') : rawBody,
     type,
@@ -367,7 +416,7 @@ export async function requireClipAccess(
 ): Promise<ClipAccessRecord> {
   const { data, error } = await supabase
     .from('clips')
-    .select('id, project_id, hierarchy')
+    .select('id, project_id, hierarchy, duration_seconds, frame_rate')
     .eq('id', clipId)
     .eq('project_id', shareLink.project_id)
     .single<ClipAccessRecord>()
@@ -394,6 +443,7 @@ export async function createAnnotationRecord(
     authorName: string
     body: string
     timecodeIn: string
+    timeOffsetSeconds: number
     type: AnnotationType
     voiceUrl?: string | null
     userId?: string | null
@@ -411,6 +461,7 @@ export async function createAnnotationRecord(
       author_id: params.userId ?? '00000000-0000-0000-0000-000000000000',
       author_name: params.authorName,
       timecode: params.timecodeIn,
+      time_offset_seconds: params.timeOffsetSeconds,
       type: params.type,
       content,
       voice_url: params.voiceUrl ?? null,

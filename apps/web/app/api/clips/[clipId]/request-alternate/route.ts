@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { assertValidAlternateRequestNote, assertValidTimecodeIn } from '@/lib/review-input-validation'
+import { getRequestClientIp } from '@/lib/request-ip'
+import {
+  checkReviewRateLimit,
+  rateLimitFingerprint,
+  rateLimitResponse,
+} from '@/lib/review-rate-limit'
 import { createServerSupabaseClient } from '@/lib/supabase'
 import {
   ReviewRouteError,
+  assertAnnotationTimeOffsetAllowed,
   broadcastClipEvent,
+  clipPlaybackBounds,
   createAnnotationRecord,
   requireClipAccess,
   requireShareLinkAccess,
+  resolveAnnotationTimeOffsetSeconds,
 } from '@/lib/review-server'
 
 export async function POST(
@@ -18,12 +28,21 @@ export async function POST(
     const timecodeIn = typeof body.timecodeIn === 'string' ? body.timecodeIn : '00:00:00:00'
     const shareToken = request.headers.get('X-Share-Token') ?? body.shareToken
 
-    if (!params.clipId || !note) {
-      return NextResponse.json({ error: 'Missing request note' }, { status: 400 })
+    if (!params.clipId) {
+      return NextResponse.json({ error: 'Missing clip' }, { status: 400 })
     }
     if (!shareToken || typeof shareToken !== 'string') {
       return NextResponse.json({ error: 'Missing share token' }, { status: 401 })
     }
+
+    const ip = getRequestClientIp(request)
+    const alternateLimit = checkReviewRateLimit('alternate', rateLimitFingerprint(ip, shareToken))
+    if (!alternateLimit.ok) {
+      return rateLimitResponse(alternateLimit.retryAfterSeconds)
+    }
+
+    assertValidAlternateRequestNote(note)
+    assertValidTimecodeIn(timecodeIn)
 
     const supabase = createServerSupabaseClient()
     const shareLink = await requireShareLinkAccess(supabase, shareToken, request)
@@ -32,13 +51,17 @@ export async function POST(
       return NextResponse.json({ error: 'Alternate requests are not permitted for this share link' }, { status: 403 })
     }
 
-    await requireClipAccess(supabase, params.clipId, shareLink)
+    const clip = await requireClipAccess(supabase, params.clipId, shareLink)
+    const { durationSeconds } = clipPlaybackBounds(clip)
+    const timeOffsetSeconds = resolveAnnotationTimeOffsetSeconds(timecodeIn, clip)
+    assertAnnotationTimeOffsetAllowed(timeOffsetSeconds, durationSeconds)
 
     const annotation = await createAnnotationRecord(supabase, {
       clipId: params.clipId,
       authorName: 'Reviewer',
       body: `REQUEST ALTERNATE: ${note}`,
       timecodeIn,
+      timeOffsetSeconds,
       type: 'text',
     })
 
