@@ -125,8 +125,8 @@ public struct GracefulDegradationManager {
         }
         
         // If last failure was recent, don't use it
-        if let lastFailure = health.lastFailure,
-           Date().timeIntervalSince(lastFailure as Date) < configuration.cooldownPeriod {
+        if health.lastFailure != nil,
+           Date().timeIntervalSince(health.lastCheck) < configuration.cooldownPeriod {
             return false
         }
         
@@ -152,8 +152,8 @@ public struct GracefulDegradationManager {
         guard let health = modelHealth[model] else { return true }
         
         // Retry if cooldown period has passed
-        if let lastFailure = health.lastFailure,
-           Date().timeIntervalSince(lastFailure as Date) >= configuration.cooldownPeriod {
+        if health.lastFailure != nil,
+           Date().timeIntervalSince(health.lastCheck) >= configuration.cooldownPeriod {
             return true
         }
         
@@ -182,7 +182,7 @@ public struct GracefulDegradationManager {
 
 // MARK: - Configuration
 
-public struct DegradationConfiguration {
+public struct DegradationConfiguration: Sendable {
     public let maxConsecutiveFailures: Int
     public let cooldownPeriod: TimeInterval
     public let performanceThreshold: TimeInterval
@@ -272,16 +272,16 @@ public struct HealthReport {
 // MARK: - Extension for CoreMLModelManager
 
 extension CoreMLModelManager {
-    private static var degradationManager = GracefulDegradationManager()
+    nonisolated(unsafe) fileprivate static var degradationManager = GracefulDegradationManager()
     
     public func loadModelsWithGracefulDegradation() async throws {
-        let models: [ModelType] = [.visionQuality, .audioQuality, .performance]
-        
-        for modelType in models {
-            do {
-                _ = try await loadModel(modelType)
+        do {
+            try await loadModels()
+            for modelType in [ModelType.visionQuality, .audioQuality, .performance] {
                 CoreMLModelManager.degradationManager.reportModelSuccess(modelType.filename)
-            } catch {
+            }
+        } catch {
+            for modelType in [ModelType.visionQuality, .audioQuality, .performance] {
                 let failure: GracefulDegradationManager.ModelFailure
                 
                 if error.localizedDescription.contains("not found") {

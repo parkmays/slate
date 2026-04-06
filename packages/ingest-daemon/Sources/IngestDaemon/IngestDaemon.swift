@@ -16,9 +16,10 @@ private extension MultiCamSyncMethod {
     /// Maps the sync-engine's MultiCamSyncMethod to the shared SyncMethod used on Clip.
     var asSyncMethod: SyncMethod {
         switch self {
-        case .waveformCorrelation: return .waveformCorrelation
-        case .timecode:            return .timecode
-        case .manual:              return .manual
+        case .timecodeMetadata: return .timecode
+        case .slateDetection: return .waveformCorrelation
+        case .audioCorrelation: return .waveformCorrelation
+        case .manual: return .manual
         }
     }
 }
@@ -43,6 +44,7 @@ public enum IngestDaemonError: Error, LocalizedError {
     case fileTooSmall(path: String, size: Int64)
     case unsupportedFormat(path: String)
     case noWatchFolder(path: String)
+    case ingestPaused
 
     public var errorDescription: String? {
         switch self {
@@ -52,6 +54,8 @@ public enum IngestDaemonError: Error, LocalizedError {
             return "Unsupported format: \(path)"
         case .noWatchFolder(let path):
             return "No watch folder registered for \(path)"
+        case .ingestPaused:
+            return "Ingest is paused"
         }
     }
 }
@@ -92,7 +96,7 @@ public actor IngestPipeline {
         let clip = buildClip(sourceURL: sourceURL, checksum: checksum, fileSize: fileSize)
         
         // Extract camera metadata
-        let cameraMetadata = CameraMetadataExtractor.extract(from: sourceURL)
+        let cameraMetadata = await CameraMetadataExtractor.extract(from: sourceURL)
         
         var clipWithMetadata = clip
         clipWithMetadata.cameraMetadata = cameraMetadata
@@ -144,7 +148,7 @@ public actor IngestPipeline {
                 let myOffset = groupResult.offsets.first { $0.angle == myAngle }
                 syncResult = SyncResult(
                     confidence: (myOffset?.confidence ?? groupResult.overallConfidence).asSharedConfidence,
-                    method: (myOffset?.method ?? .waveformCorrelation).asSyncMethod,
+                    method: (myOffset?.method ?? .audioCorrelation).asSyncMethod,
                     offsetFrames: myOffset?.offsetFrames ?? 0,
                     driftPPM: 0
                 )
@@ -171,7 +175,8 @@ public actor IngestPipeline {
         proxyClip.syncResult = syncResult
         proxyClip.syncedAudioPath = syncedAudioPath
         let proxyGenerator = ProxyGenerator(dbQueue: try await store.dbQueue)
-        try await proxyGenerator.generateProxy(for: proxyClip)
+        let burnIn = watchConfig.burnInConfig ?? BurnInConfig()
+        try await proxyGenerator.generateProxy(for: proxyClip, burnInConfig: burnIn)
 
         try await store.updateIngestQueueStage(id: queueItem.id, stage: .ready, startedAt: Date())
 
@@ -303,6 +308,7 @@ public actor IngestDaemon {
     private let store: GRDBStore
     private var watchFolders: [String: WatchFolderConfig] = [:]
     private var progressReport = IngestProgressReport()
+    private var ingestPaused = false
 
     public init(dbPath: String? = nil) throws {
         if let dbPath {
@@ -322,6 +328,9 @@ public actor IngestDaemon {
     }
 
     public func ingestFile(at sourceURL: URL) async throws -> Clip {
+        guard !ingestPaused else {
+            throw IngestDaemonError.ingestPaused
+        }
         guard let config = watchFolders.values.first(where: { sourceURL.path.hasPrefix($0.path) }) else {
             throw IngestDaemonError.noWatchFolder(path: sourceURL.path)
         }
@@ -341,11 +350,23 @@ public actor IngestDaemon {
 
     public func stop() {
     }
+
+    public func pauseIngest() async {
+        ingestPaused = true
+    }
+
+    public func resumeIngestFromPause() async {
+        ingestPaused = false
+    }
+
+    public func cancelClip(clipId: String) async {
+        progressReport.active.removeAll { $0.filename.contains(clipId) }
+        publishProgress()
+    }
     
     public func resumeInterruptedIngests() async {
         let stuckThreshold: TimeInterval = 300  // 5 minutes
         let now = Date().timeIntervalSince1970
-        let stuckStages: [GRDBStore.IngestStage] = [.copying, .checksumming, .proxyActive]
 
         let stuck = try? await store.fetchStuckIngestQueue(olderThan: now - stuckThreshold)
 
@@ -376,11 +397,15 @@ public actor IngestDaemon {
                 IngestError(filename: item.filename, message: message)
             )
         }
+        publishProgress()
+    }
 
+    private func publishProgress() {
         NotificationCenter.default.post(
             name: Notification.Name("ingestProgressUpdated"),
             object: progressReport
         )
+        IngestXPCProgressDispatcher.pushProgressReport(progressReport)
     }
 }
 

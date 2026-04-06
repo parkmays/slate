@@ -24,6 +24,7 @@ public struct ContentView: View {
     @StateObject private var cloudSyncStore: CloudSyncStore
     @StateObject private var cloudAuthManager: CloudAuthManager
     @State private var selectedClip: Clip?
+    @State private var multiCamGroupId: String?
     @State private var showingIngestProgress = false
     @State private var showingShareSheet = false
     @State private var showingAssemblySheet = false
@@ -84,6 +85,7 @@ public struct ContentView: View {
         .sheet(isPresented: $showingAssemblySheet) {
             if let project = appState.selectedProject {
                 AssemblyView(project: project, clipStore: clipStore)
+                    .environmentObject(supabaseManager)
             }
         }
         .sheet(isPresented: $showingCloudSyncSheet) {
@@ -110,6 +112,13 @@ public struct ContentView: View {
         }
         .onReceive(clipStore.$projects) { projects in
             projectStore.setProjects(projects)
+            let selectedId = appState.selectedProject?.id
+            if let selectedId {
+                let refreshed = projects.first { $0.id == selectedId }
+                if let refreshed {
+                    appState.selectedProject = refreshed
+                }
+            }
             if appState.selectedProject == nil {
                 appState.selectedProject = projectStore.activeProject
                 if let project = projectStore.activeProject {
@@ -117,6 +126,10 @@ public struct ContentView: View {
                         await clipStore.selectProject(project)
                     }
                 }
+            }
+            let store = clipStore
+            Task {
+                await ContentView.rescheduleDailyDigests(projects: projects, clipStore: store)
             }
         }
         .onReceive(clipStore.$clips) { clips in
@@ -138,6 +151,7 @@ public struct ContentView: View {
         .onChange(of: appState.selectedProject?.id) {
             let newProject = appState.selectedProject
             selectedClip = nil
+            multiCamGroupId = nil
             Task {
                 if let projectId = newProject?.id {
                     await supabaseManager.realtime.subscribeToProject(projectId)
@@ -153,6 +167,14 @@ public struct ContentView: View {
                     await supabaseManager.realtime.subscribeToClip(clipId)
                 } else {
                     await supabaseManager.realtime.unsubscribeFromClip()
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .multiCamNavigateToGroup)) { notification in
+            if let gid = notification.userInfo?["groupId"] as? String {
+                multiCamGroupId = gid
+                if let clip = clipStore.clips(forGroupId: gid).first {
+                    selectedClip = clip
                 }
             }
         }
@@ -185,7 +207,17 @@ public struct ContentView: View {
                 clipStore: clipStore,
                 selectedClip: $selectedClip,
                 isImportingMedia: isImportingMedia,
-                importDroppedURLs: importDroppedMedia
+                importDroppedURLs: importDroppedMedia,
+                onSelectClip: { clip in
+                    multiCamGroupId = nil
+                    selectedClip = clip
+                },
+                onOpenMultiCamGroup: { groupId in
+                    multiCamGroupId = groupId
+                    if let clip = clipStore.clips(forGroupId: groupId).first {
+                        selectedClip = clip
+                    }
+                }
             )
         } else {
             EmptyProjectView()
@@ -194,8 +226,18 @@ public struct ContentView: View {
 
     @ViewBuilder
     private var detailColumn: some View {
-        if let clip = selectedClip {
+        if let groupId = multiCamGroupId {
+            MultiCamPreviewView(
+                groupId: groupId,
+                clips: clipStore.clips(forGroupId: groupId),
+                clipStore: clipStore,
+                syncManager: syncManager,
+                onClose: { multiCamGroupId = nil }
+            )
+            .environmentObject(supabaseManager)
+        } else if let clip = selectedClip {
             ClipDetailView(clip: clip, syncManager: syncManager)
+                .environmentObject(supabaseManager)
         } else {
             ClipSelectionPlaceholder()
         }
@@ -271,6 +313,16 @@ public struct ContentView: View {
                 }
             } catch {
                 importNotice = error.localizedDescription
+            }
+        }
+    }
+
+    private static func rescheduleDailyDigests(projects: [Project], clipStore: GRDBClipStore) async {
+        for p in projects {
+            if p.dailyDigestEnabled, !p.digestTargets.isEmpty {
+                await DigestService.shared.scheduleDailyDigest(for: p, sendAt: p.digestHour, clipStore: clipStore)
+            } else {
+                await DigestService.shared.cancelDigestSchedule(forProjectId: p.id)
             }
         }
     }

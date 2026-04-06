@@ -1,8 +1,9 @@
-import Foundation
+import AVFoundation
 import Combine
+import Foundation
 
 /// Real-time progress reporting for long-running AI tasks
-public class ProgressReporter: ObservableObject {
+public final class ProgressReporter: ObservableObject, @unchecked Sendable {
     
     public struct TaskProgress: Sendable {
         public let taskId: String
@@ -33,7 +34,7 @@ public class ProgressReporter: ObservableObject {
         }
     }
     
-    public enum TaskType: String, CaseIterable {
+    public enum TaskType: String, CaseIterable, Sendable {
         case visionScoring = "vision_scoring"
         case audioScoring = "audio_scoring"
         case transcription = "transcription"
@@ -43,7 +44,7 @@ public class ProgressReporter: ObservableObject {
         case fullAnalysis = "full_analysis"
     }
     
-    public enum Phase: String, CaseIterable {
+    public enum Phase: String, CaseIterable, Sendable {
         case initializing = "initializing"
         case loading = "loading"
         case processing = "processing"
@@ -57,13 +58,13 @@ public class ProgressReporter: ObservableObject {
     @Published public private(set) var completedTasks: [String: TaskProgress] = [:]
     @Published public private(set) var failedTasks: [String: TaskProgress] = [:]
     
-    private let progressUpdateSubject = PassthroughSubject<TaskProgress, Never>()
+    private nonisolated(unsafe) let progressUpdateSubject = PassthroughSubject<TaskProgress, Never>()
     private var cancellables = Set<AnyCancellable>()
     private let progressUpdateQueue = DispatchQueue(label: "progress.updates", qos: .userInitiated)
     
     public init() {
         // Clean up old tasks periodically
-        Timer.publish(every: 300) // Every 5 minutes
+        Timer.publish(every: 300, on: .main, in: .common) // Every 5 minutes
             .autoconnect()
             .sink { [weak self] _ in
                 self?.cleanupOldTasks()
@@ -106,7 +107,7 @@ public class ProgressReporter: ObservableObject {
     ) {
         progressUpdateQueue.async { [weak self] in
             guard let self = self,
-                  var taskProgress = self.currentTasks[taskId] else { return }
+                  let taskProgress = self.currentTasks[taskId] else { return }
             
             let newProgress = TaskProgress(
                 taskId: taskId,
@@ -133,7 +134,7 @@ public class ProgressReporter: ObservableObject {
     ) {
         progressUpdateQueue.async { [weak self] in
             guard let self = self,
-                  var taskProgress = self.currentTasks[taskId] else { return }
+                  let taskProgress = self.currentTasks[taskId] else { return }
             
             let totalProgress = Double(taskProgress.completedSteps) / Double(max(taskProgress.totalSteps, 1))
             let adjustedProgress = totalProgress + (stepProgress / Double(max(taskProgress.totalSteps, 1)))
@@ -154,7 +155,7 @@ public class ProgressReporter: ObservableObject {
     ) {
         progressUpdateQueue.async { [weak self] in
             guard let self = self,
-                  var taskProgress = self.currentTasks[taskId] else { return }
+                  let taskProgress = self.currentTasks[taskId] else { return }
             
             let finalProgress = TaskProgress(
                 taskId: taskId,
@@ -182,7 +183,7 @@ public class ProgressReporter: ObservableObject {
     ) {
         progressUpdateQueue.async { [weak self] in
             guard let self = self,
-                  var taskProgress = self.currentTasks[taskId] else { return }
+                  let taskProgress = self.currentTasks[taskId] else { return }
             
             let finalProgress = TaskProgress(
                 taskId: taskId,
@@ -231,9 +232,8 @@ public class ProgressReporter: ObservableObject {
     }
     
     private func publishUpdate(_ progress: TaskProgress) {
-        DispatchQueue.main.async { [weak self] in
-            self?.progressUpdateSubject.send(progress)
-        }
+        // Subscribers use `.receive(on: DispatchQueue.main)`; emit from this queue without hopping to MainActor (avoids Swift 6 isolation errors on PassthroughSubject).
+        progressUpdateSubject.send(progress)
     }
     
     private func calculateETA(for current: TaskProgress, progress: Double) -> TimeInterval? {
@@ -287,19 +287,20 @@ extension VisionScorer {
             generator.maximumSize = CGSize(width: 640, height: 360)
             
             let step = max(1.0 / max(2, 1), 0.25)
-            let sampleTimes = stride(from: 0.0, through: max(0, duration - 0.001), by: step).prefix(12)
+            let sampleTimes = Array(stride(from: 0.0, through: max(0, duration - 0.001), by: step).prefix(12))
+            let sampleCount = sampleTimes.count
             
             reporter.updateProgress(taskId: taskId, phase: .processing, progress: 0.3, message: "Analyzing frames...")
             
             // Process frames
             var frameResults: [(focus: Double, exposure: Double, stability: Double)] = []
-            for (index, time) in sampleTimes.enumerated() {
-                let frameProgress = Double(index) / Double(sampleTimes.count)
+            for (index, _) in sampleTimes.enumerated() {
+                let frameProgress = Double(index) / Double(max(sampleCount, 1))
                 reporter.updateProgress(
                     taskId: taskId,
                     phase: .analyzing,
                     progress: 0.3 + (frameProgress * 0.5),
-                    message: "Analyzing frame \(index + 1) of \(sampleTimes.count)..."
+                    message: "Analyzing frame \(index + 1) of \(sampleCount)..."
                 )
                 
                 // Process frame here...
@@ -336,61 +337,13 @@ extension VisionScorer {
     }
 }
 
-extension SyncEngine {
-    public func syncClipWithProgress(
-        primary: URL,
-        secondary: URL,
-        fps: Double,
-        reporter: ProgressReporter,
-        taskId: String
-    ) async throws -> MultiCamSyncResult {
-        reporter.startTask(
-            id: taskId,
-            type: .syncAnalysis,
-            message: "Starting sync analysis...",
-            totalSteps: 3
-        )
-        
-        do {
-            // Try timecode sync
-            reporter.updateStep(taskId: taskId, stepName: "Timecode analysis", stepProgress: 0.0, message: "Checking for timecode metadata...")
-            
-            if let timecodeResult = try await attemptTimecodeSync(primary: primary, secondary: secondary, fps: fps) {
-                reporter.completeTask(taskId: taskId, message: "Sync completed using timecode metadata")
-                return timecodeResult
-            }
-            
-            // Try slate detection
-            reporter.updateStep(taskId: taskId, stepName: "Slate detection", stepProgress: 0.33, message: "Analyzing video for slate...")
-            
-            if let slateResult = try await attemptSlateDetectionSync(primary: primary, secondary: secondary, fps: fps) {
-                reporter.completeTask(taskId: taskId, message: "Sync completed using slate detection")
-                return slateResult
-            }
-            
-            // Audio correlation
-            reporter.updateStep(taskId: taskId, stepName: "Audio correlation", stepProgress: 0.66, message: "Performing audio correlation analysis...")
-            reporter.updateProgress(taskId: taskId, phase: .processing, progress: 0.7, message: "Analyzing audio patterns...")
-            
-            let audioResult = try await attemptAudioCorrelationSync(primary: primary, secondary: secondary, fps: fps)
-            
-            reporter.completeTask(taskId: taskId, message: "Sync completed using audio correlation")
-            return audioResult
-            
-        } catch {
-            reporter.failTask(taskId: taskId, error: error, message: "Sync analysis failed")
-            throw error
-        }
-    }
-}
-
 // MARK: - SwiftUI Integration Helper
 
 #if canImport(SwiftUI)
 import SwiftUI
 
 @MainActor
-public struct ProgressView: View {
+public struct SLATETaskProgressView: View {
     @ObservedObject var reporter: ProgressReporter
     let taskId: String
     
@@ -406,7 +359,7 @@ public struct ProgressView: View {
                         .foregroundColor(.secondary)
                 }
                 
-                ProgressView(value: progress.progress)
+                SwiftUI.ProgressView(value: progress.progress)
                     .progressViewStyle(LinearProgressViewStyle())
                 
                 Text(progress.message)
@@ -416,7 +369,7 @@ public struct ProgressView: View {
                 if let eta = progress.estimatedTimeRemaining, eta > 0 {
                     Text("Estimated time remaining: \(formatDuration(eta))")
                         .font(.caption2)
-                        .foregroundColor(.tertiary)
+                        .foregroundStyle(.tertiary)
                 }
             }
             .padding()

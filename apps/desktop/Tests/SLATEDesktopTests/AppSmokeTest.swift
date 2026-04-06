@@ -179,3 +179,119 @@ struct CloudSyncStorePersistenceTests {
         #expect(store.destinations.first?.configuration.remotePath == "/Apps/SLATE/SyncProject")
     }
 }
+
+// MARK: - Daily digest
+
+@Suite("DigestService")
+struct DigestServiceTests {
+    @Test("generateDigest ranks top takes, flags low scores, and formats email body")
+    func digestAggregates() async {
+        let projectId = "proj-digest-1"
+        let today = ISO8601DateFormatter().string(from: Date())
+
+        let reasoning = ScoreReason(dimension: "focus", score: 80, flag: .info, message: "Sharp focus on talent.")
+
+        let scoresHigh = AIScores(
+            composite: 92,
+            focus: 90,
+            exposure: 88,
+            stability: 85,
+            audio: 90,
+            scoredAt: today,
+            modelVersion: "test",
+            reasoning: [reasoning]
+        )
+        let scoresMid = AIScores(
+            composite: 55,
+            focus: 50,
+            exposure: 50,
+            stability: 50,
+            audio: 55,
+            scoredAt: today,
+            modelVersion: "test",
+            reasoning: [reasoning]
+        )
+        let scoresBad = AIScores(
+            composite: 30,
+            focus: 20,
+            exposure: 25,
+            stability: 30,
+            audio: 20,
+            scoredAt: today,
+            modelVersion: "test",
+            reasoning: [ScoreReason(dimension: "audio", score: 20, flag: .warning, message: "Low boom level.")]
+        )
+        let scoresAudioOnly = AIScores(
+            composite: 70,
+            focus: 70,
+            exposure: 70,
+            stability: 70,
+            audio: 25,
+            scoredAt: today,
+            modelVersion: "test",
+            reasoning: []
+        )
+
+        func clip(
+            id: String,
+            scene: String,
+            take: Int,
+            scores: AIScores?,
+            review: ReviewStatus
+        ) -> Clip {
+            Clip(
+                id: id,
+                projectId: projectId,
+                checksum: id,
+                sourcePath: "/tmp/\(id).mov",
+                sourceSize: 1000,
+                sourceFormat: .h264,
+                sourceFps: 24,
+                sourceTimecodeStart: "01:00:00:00",
+                duration: 60,
+                narrativeMeta: NarrativeMeta(
+                    sceneNumber: scene,
+                    shotCode: "A",
+                    takeNumber: take,
+                    cameraId: "A"
+                ),
+                aiScores: scores,
+                reviewStatus: review,
+                ingestedAt: today,
+                projectMode: .narrative
+            )
+        }
+
+        let clips = [
+            clip(id: "c1", scene: "12", take: 1, scores: scoresHigh, review: .circled),
+            clip(id: "c2", scene: "12", take: 2, scores: scoresMid, review: .unreviewed),
+            clip(id: "c3", scene: "14", take: 1, scores: scoresBad, review: .unreviewed),
+            clip(id: "c4", scene: "14", take: 2, scores: scoresAudioOnly, review: .unreviewed),
+            clip(id: "c5", scene: "20", take: 1, scores: scoresMid, review: .circled),
+            clip(id: "c6", scene: "30", take: 1, scores: scoresHigh, review: .unreviewed)
+        ]
+
+        let report = await DigestService.shared.generateDigest(
+            for: projectId,
+            clips: clips,
+            projectName: "Mountain Test",
+            referenceDate: Date()
+        )
+
+        #expect(report.totalClipsIngested == clips.count)
+        #expect(report.topTakes.count <= 5)
+        #expect(report.topTakes.first?.compositeScore == 92)
+        #expect(report.flaggedTakes.count >= 2)
+        let flaggedIds = Set(report.flaggedTakes.map(\.clipId))
+        #expect(flaggedIds.contains("c3"))
+        #expect(flaggedIds.contains("c4"))
+        #expect(report.scenesCompleted.contains("12"))
+        #expect(report.scenesCompleted.contains("20"))
+        #expect(report.scenesContinued.contains("14"))
+        #expect(report.scenesContinued.contains("30"))
+
+        let body = DigestService.plainTextEmailBody(for: report)
+        #expect(body.contains("SLATE DAILY DIGEST — Mountain Test"))
+        #expect(body.contains("Powered by SLATE · Mountain Top Pictures"))
+    }
+}

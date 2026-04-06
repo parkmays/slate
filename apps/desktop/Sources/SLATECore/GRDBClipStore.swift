@@ -7,6 +7,7 @@
 import Combine
 import Foundation
 import GRDB
+import IngestDaemon
 import SLATESharedTypes
 import SwiftUI
 
@@ -91,6 +92,42 @@ public final class GRDBClipStore: ObservableObject {
         return statistics
     }
 
+    /// Latest merged project row (including UserDefaults delivery settings).
+    public func project(byId id: String) -> Project? {
+        projects.first(where: { $0.id == id })
+    }
+
+    /// All clips for a project (not limited to the selected sidebar project).
+    public func fetchAllClips(forProjectId projectId: String) async -> [Clip] {
+        guard let dbQueue else {
+            return []
+        }
+        do {
+            let rows = try await dbQueue.read { db in
+                try Row.fetchAll(
+                    db,
+                    sql: """
+                        SELECT * FROM clips
+                        WHERE project_id = ?
+                        ORDER BY ingested_at DESC
+                    """,
+                    arguments: [projectId]
+                )
+            }
+            return try rows.map(Self.decodeClip(from:))
+        } catch {
+            self.error = error
+            return []
+        }
+    }
+
+    /// Updates in-memory `projects` after changing delivery / digest settings.
+    public func applyDeliverySettings(_ project: Project) {
+        if let idx = projects.firstIndex(where: { $0.id == project.id }) {
+            projects[idx] = project
+        }
+    }
+
     public var groupedNarrativeClips: [String: [Clip]] {
         Dictionary(grouping: clips) { clip in
             clip.narrativeMeta?.sceneNumber.isEmpty == false ? clip.narrativeMeta!.sceneNumber : "Unknown Scene"
@@ -132,7 +169,10 @@ public final class GRDBClipStore: ObservableObject {
                     """
                 )
             }
-            projects = rows.compactMap(Self.decodeProject(from:))
+            projects = rows.compactMap { row in
+                guard let base = Self.decodeProject(from: row) else { return nil }
+                return ProjectSettingsPersistence.merge(into: base)
+            }
             if selectedProjectId == nil {
                 selectedProjectId = projects.first?.id
             }
@@ -188,6 +228,216 @@ public final class GRDBClipStore: ObservableObject {
                 )
             """)
             try AssemblyStore.ensureAssemblySchema(in: db)
+            try Self.migrateClipsColumnsIfNeeded(in: db)
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS scripts (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    title TEXT,
+                    total_pages INTEGER NOT NULL,
+                    scenes TEXT NOT NULL,
+                    source_filename TEXT,
+                    parsed_at TEXT NOT NULL
+                )
+            """)
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS clip_script_mappings (
+                    clip_id TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+                    script_id TEXT NOT NULL REFERENCES scripts(id) ON DELETE CASCADE,
+                    scene_number TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    mapping_source TEXT NOT NULL,
+                    PRIMARY KEY (clip_id, script_id)
+                )
+            """)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_scripts_project_id ON scripts(project_id)")
+        }
+    }
+
+    /// Imports a `.fdx` or `.pdf` screenplay into the local GRDB database and maps clips for the project.
+    public func importScript(from url: URL, projectId: String) async throws -> ScriptImportResult {
+        guard let dbQueue else {
+            throw NSError(
+                domain: "GRDBClipStore",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Database is not open."]
+            )
+        }
+        let result: ScriptImportResult
+        switch url.pathExtension.lowercased() {
+        case "fdx":
+            result = try ScriptImporter.parse(fdxURL: url)
+        case "pdf":
+            result = try ScriptImporter.parse(pdfURL: url)
+        default:
+            throw NSError(
+                domain: "GRDBClipStore",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Choose a .fdx or .pdf screenplay."]
+            )
+        }
+
+        let rows = try await dbQueue.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT * FROM clips WHERE project_id = ?",
+                arguments: [projectId]
+            )
+        }
+        let projectClips = try rows.map { try Self.decodeClip(from: $0) }
+        let mappings = ScriptImporter.mapClipsToScript(clips: projectClips, script: result)
+        let scriptId = UUID().uuidString
+        let scenesData = try JSONEncoder().encode(result.scenes)
+        let scenesJSON = String(data: scenesData, encoding: .utf8) ?? "[]"
+
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO scripts (id, project_id, title, total_pages, scenes, source_filename, parsed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                arguments: [
+                    scriptId,
+                    projectId,
+                    result.title,
+                    result.totalPages,
+                    scenesJSON,
+                    url.lastPathComponent,
+                    result.parsedAt
+                ]
+            )
+            for m in mappings {
+                try db.execute(
+                    sql: """
+                        INSERT INTO clip_script_mappings (clip_id, script_id, scene_number, confidence, mapping_source)
+                        VALUES (?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        m.clipId,
+                        scriptId,
+                        m.sceneNumber,
+                        m.confidence,
+                        m.source.rawValue
+                    ]
+                )
+            }
+        }
+
+        if selectedProjectId == projectId {
+            await loadClips()
+        }
+        return result
+    }
+
+    /// Clips sharing a multi-camera group id, ordered A → D by `cameraAngle`.
+    public func clips(forGroupId groupId: String) -> [Clip] {
+        clips
+            .filter { $0.cameraGroupId == groupId }
+            .sorted { lhs, rhs in
+                Self.angleSortKey(lhs.cameraAngle) < Self.angleSortKey(rhs.cameraAngle)
+            }
+    }
+
+    private static func angleSortKey(_ angle: String?) -> Int {
+        guard let raw = angle?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), !raw.isEmpty else {
+            return 99
+        }
+        let letter = raw.prefix(1)
+        switch letter {
+        case "A": return 0
+        case "B": return 1
+        case "C": return 2
+        case "D": return 3
+        default: return 99
+        }
+    }
+
+    public func hasMultipleAngles(forGroupId groupId: String) -> Bool {
+        clips(forGroupId: groupId).count >= 2
+    }
+
+    public func updateReviewStatus(clipId: String, status: ReviewStatus) async {
+        guard let dbQueue, let selectedProjectId else {
+            return
+        }
+        let now = ISO8601DateFormatter().string(from: Date())
+        do {
+            try await dbQueue.write { db in
+                try db.execute(
+                    sql: """
+                        UPDATE clips
+                        SET review_status = ?, updated_at = ?
+                        WHERE id = ? AND project_id = ?
+                    """,
+                    arguments: [status.rawValue, now, clipId, selectedProjectId]
+                )
+            }
+            await loadClips()
+            NotificationCenter.default.post(name: .clipUpdated, object: nil)
+        } catch {
+            self.error = error
+        }
+    }
+
+    /// Circles one clip in a multi-cam group and clears circle status on sibling angles.
+    public func applyCircleInMultiCamGroup(selectedClipId: String, groupId: String) async {
+        let siblings = clips(forGroupId: groupId)
+        guard siblings.contains(where: { $0.id == selectedClipId }) else {
+            return
+        }
+        guard let dbQueue, let selectedProjectId else {
+            return
+        }
+        let now = ISO8601DateFormatter().string(from: Date())
+        do {
+            try await dbQueue.write { db in
+                for clip in siblings {
+                    let status: ReviewStatus = clip.id == selectedClipId ? .circled : .unreviewed
+                    try db.execute(
+                        sql: """
+                            UPDATE clips
+                            SET review_status = ?, updated_at = ?
+                            WHERE id = ? AND project_id = ?
+                        """,
+                        arguments: [status.rawValue, now, clip.id, selectedProjectId]
+                    )
+                }
+            }
+            await loadClips()
+            NotificationCenter.default.post(name: .clipUpdated, object: nil)
+        } catch {
+            self.error = error
+        }
+    }
+
+    private nonisolated static func migrateClipsColumnsIfNeeded(in db: Database) throws {
+        let columns = try String.fetchAll(
+            db,
+            sql: "SELECT name FROM pragma_table_info('clips')"
+        )
+        func addColumn(_ sql: String) throws {
+            try db.execute(sql: sql)
+        }
+        if !columns.contains("camera_group_id") {
+            try addColumn("ALTER TABLE clips ADD COLUMN camera_group_id TEXT")
+        }
+        if !columns.contains("camera_angle") {
+            try addColumn("ALTER TABLE clips ADD COLUMN camera_angle TEXT")
+        }
+        if !columns.contains("proxy_lut") {
+            try addColumn("ALTER TABLE clips ADD COLUMN proxy_lut TEXT")
+        }
+        if !columns.contains("proxy_color_space") {
+            try addColumn("ALTER TABLE clips ADD COLUMN proxy_color_space TEXT")
+        }
+        if !columns.contains("camera_metadata") {
+            try addColumn("ALTER TABLE clips ADD COLUMN camera_metadata TEXT")
+        }
+        if !columns.contains("proxy_r2_url") {
+            try addColumn("ALTER TABLE clips ADD COLUMN proxy_r2_url TEXT")
+        }
+        if !columns.contains("proxy_r2_uploaded_at") {
+            try addColumn("ALTER TABLE clips ADD COLUMN proxy_r2_uploaded_at TEXT")
         }
     }
 
@@ -198,7 +448,7 @@ public final class GRDBClipStore: ObservableObject {
         }
 
         let reviewedCount = clips.filter { $0.reviewStatus != .unreviewed }.count
-        let readyProxies = clips.filter { $0.proxyStatus == .ready }.count
+        let readyProxies = clips.filter { [.ready, .completed].contains($0.proxyStatus) }.count
 
         return ProjectStatistics(
             totalClips: totalClips,
@@ -235,11 +485,16 @@ public final class GRDBClipStore: ObservableObject {
             proxyPath: row["proxy_path"],
             proxyStatus: ProxyStatus(rawValue: row["proxy_status"]) ?? .pending,
             proxyChecksum: row["proxy_checksum"],
+            proxyR2URL: row["proxy_r2_url"],
+            proxyLUT: row["proxy_lut"],
+            proxyColorSpace: row["proxy_color_space"],
             narrativeMeta: try decodeJSON(row["narrative_meta"], as: NarrativeMeta.self),
             documentaryMeta: try decodeJSON(row["documentary_meta"], as: DocumentaryMeta.self),
             audioTracks: try decodeJSON(row["audio_tracks"], as: [AudioTrack].self) ?? [],
             syncResult: try decodeJSON(row["sync_result"], as: SyncResult.self) ?? .unsynced,
             syncedAudioPath: row["synced_audio_path"],
+            cameraGroupId: row["camera_group_id"],
+            cameraAngle: row["camera_angle"],
             aiScores: try decodeJSON(row["ai_scores"], as: AIScores.self),
             transcriptId: row["transcript_id"],
             aiProcessingStatus: AIProcessingStatus(rawValue: row["ai_processing_status"]) ?? .pending,
@@ -250,7 +505,8 @@ public final class GRDBClipStore: ObservableObject {
             approvedAt: row["approved_at"],
             ingestedAt: row["ingested_at"],
             updatedAt: row["updated_at"],
-            projectMode: ProjectMode(rawValue: row["project_mode"]) ?? .narrative
+            projectMode: ProjectMode(rawValue: row["project_mode"]) ?? .narrative,
+            cameraMetadata: try decodeJSON(row["camera_metadata"], as: CameraMetadata.self)
         )
     }
 

@@ -35,20 +35,20 @@ public enum GRDBStoreError: Error, LocalizedError {
 public actor GRDBStore {
     public static let shared = GRDBStore()
 
-    private var dbQueue: DatabaseQueue?
+    private var databaseQueue: DatabaseQueue?
 
     public init() {}
 
     public init(path: String) throws {
         let queue = try Self.makeQueue(path: path)
-        self.dbQueue = queue
+        self.databaseQueue = queue
         try queue.write { db in
             try Self.buildSchema(in: db)
         }
     }
 
     public func setup(at path: String) throws {
-        if dbQueue != nil {
+        if databaseQueue != nil {
             return
         }
 
@@ -56,7 +56,7 @@ public actor GRDBStore {
         try queue.write { db in
             try Self.buildSchema(in: db)
         }
-        dbQueue = queue
+        databaseQueue = queue
     }
 
     public func saveProject(_ project: Project) async throws {
@@ -96,9 +96,10 @@ public actor GRDBStore {
                         sync_result, synced_audio_path, camera_group_id, camera_angle,
                         ai_scores, transcript_id,
                         ai_processing_status, review_status, annotations, approval_status,
-                        approved_by, approved_at, ingested_at, updated_at, project_mode, camera_metadata
+                        approved_by, approved_at, ingested_at, updated_at, project_mode, camera_metadata,
+                        proxy_r2_url, proxy_r2_uploaded_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         project_id = excluded.project_id,
                         checksum = excluded.checksum,
@@ -131,7 +132,9 @@ public actor GRDBStore {
                         ingested_at = excluded.ingested_at,
                         updated_at = excluded.updated_at,
                         project_mode = excluded.project_mode,
-                        camera_metadata = excluded.camera_metadata
+                        camera_metadata = excluded.camera_metadata,
+                        proxy_r2_url = excluded.proxy_r2_url,
+                        proxy_r2_uploaded_at = excluded.proxy_r2_uploaded_at
                 """,
                 arguments: try [
                     clip.id,
@@ -166,7 +169,34 @@ public actor GRDBStore {
                     clip.ingestedAt,
                     clip.updatedAt,
                     clip.projectMode.rawValue,
-                    Self.encodeJSON(clip.cameraMetadata)
+                    Self.encodeJSON(clip.cameraMetadata),
+                    clip.proxyR2URL,
+                    nil as String?
+                ]
+            )
+        }
+    }
+
+    /// Marks proxy as uploaded to R2 (Supabase parity: `proxy_status = completed`, public URL + timestamp).
+    public func markProxyUploaded(clipId: String, publicURL: String) async throws {
+        let queue = try q()
+        let now = ISO8601DateFormatter().string(from: Date())
+        try await queue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE clips
+                    SET proxy_status = ?,
+                        proxy_r2_url = ?,
+                        proxy_r2_uploaded_at = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                arguments: [
+                    ProxyStatus.completed.rawValue,
+                    publicURL,
+                    now,
+                    now,
+                    clipId
                 ]
             )
         }
@@ -268,6 +298,42 @@ public actor GRDBStore {
         }
     }
 
+    public func updateClipAudioTracks(clipId: String, tracks: [AudioTrack]) async throws {
+        let queue = try q()
+        let updatedAt = ISO8601DateFormatter().string(from: Date())
+
+        try await queue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE clips
+                    SET audio_tracks = ?, updated_at = ?
+                    WHERE id = ?
+                """,
+                arguments: try [
+                    Self.encodeJSON(tracks) ?? "[]",
+                    updatedAt,
+                    clipId
+                ]
+            )
+        }
+    }
+
+    public func updateClipReviewStatus(clipId: String, status: ReviewStatus) async throws {
+        let queue = try q()
+        let updatedAt = ISO8601DateFormatter().string(from: Date())
+
+        try await queue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE clips
+                    SET review_status = ?, updated_at = ?
+                    WHERE id = ?
+                """,
+                arguments: [status.rawValue, updatedAt, clipId]
+            )
+        }
+    }
+
     public func updateAIScores(
         clipId: String,
         aiScores: AIScores,
@@ -321,16 +387,18 @@ public actor GRDBStore {
         try await queue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO watch_folders (path, project_id, mode, created_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO watch_folders (path, project_id, mode, burn_in_config, created_at)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(path) DO UPDATE SET
                         project_id = excluded.project_id,
-                        mode = excluded.mode
+                        mode = excluded.mode,
+                        burn_in_config = excluded.burn_in_config
                 """,
                 arguments: [
                     watchFolder.path,
                     watchFolder.projectId,
                     watchFolder.mode.rawValue,
+                    try Self.encodeJSON(watchFolder.burnInConfig),
                     createdAt
                 ]
             )
@@ -343,7 +411,7 @@ public actor GRDBStore {
             let rows = try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT path, project_id, mode
+                    SELECT path, project_id, mode, burn_in_config
                     FROM watch_folders
                     ORDER BY created_at ASC
                 """
@@ -353,10 +421,10 @@ public actor GRDBStore {
     }
 
     private func q() throws -> DatabaseQueue {
-        guard let dbQueue else {
+        guard let databaseQueue else {
             throw GRDBStoreError.notSetup
         }
-        return dbQueue
+        return databaseQueue
     }
 
     private static func makeQueue(path: String) throws -> DatabaseQueue {
@@ -443,6 +511,12 @@ public actor GRDBStore {
         if !clipColumns.contains("camera_angle") {
             try db.execute(sql: "ALTER TABLE clips ADD COLUMN camera_angle TEXT")
         }
+        if !clipColumns.contains("proxy_r2_url") {
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN proxy_r2_url TEXT")
+        }
+        if !clipColumns.contains("proxy_r2_uploaded_at") {
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN proxy_r2_uploaded_at TEXT")
+        }
 
         try db.execute(sql: """
             CREATE TABLE IF NOT EXISTS watch_folders (
@@ -452,6 +526,13 @@ public actor GRDBStore {
                 created_at TEXT NOT NULL
             )
         """)
+
+        let watchFolderColumns = Set(try Row.fetchAll(db, sql: "PRAGMA table_info(watch_folders)").compactMap { row in
+            row["name"] as String?
+        })
+        if !watchFolderColumns.contains("burn_in_config") {
+            try db.execute(sql: "ALTER TABLE watch_folders ADD COLUMN burn_in_config TEXT")
+        }
 
         try db.execute(sql: """
             CREATE TABLE IF NOT EXISTS assemblies (
@@ -502,6 +583,83 @@ public actor GRDBStore {
         try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_assembly_versions_assembly_id ON assembly_versions(assembly_id)")
         try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_ingest_queue_stage ON ingest_queue(stage)")
         try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_ingest_queue_clip ON ingest_queue(clip_id)")
+
+        try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS scripts (
+                id TEXT PRIMARY KEY NOT NULL,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                title TEXT,
+                total_pages INTEGER NOT NULL,
+                scenes TEXT NOT NULL,
+                source_filename TEXT,
+                parsed_at TEXT NOT NULL
+            )
+        """)
+
+        try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS clip_script_mappings (
+                clip_id TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+                script_id TEXT NOT NULL REFERENCES scripts(id) ON DELETE CASCADE,
+                scene_number TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                mapping_source TEXT NOT NULL,
+                PRIMARY KEY (clip_id, script_id)
+            )
+        """)
+
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_scripts_project_id ON scripts(project_id)")
+    }
+
+    /// Persists a parsed screenplay and returns the new script row id.
+    @discardableResult
+    public func saveScriptImport(projectId: String, result: ScriptImportResult) async throws -> String {
+        let queue = try q()
+        let scriptId = UUID().uuidString
+        let scenesJSON = try Self.encodeJSON(result.scenes) ?? "[]"
+        let sourceName = result.sourceURL.lastPathComponent
+        try await queue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO scripts (id, project_id, title, total_pages, scenes, source_filename, parsed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                arguments: [
+                    scriptId,
+                    projectId,
+                    result.title,
+                    result.totalPages,
+                    scenesJSON,
+                    sourceName,
+                    result.parsedAt
+                ]
+            )
+        }
+        return scriptId
+    }
+
+    public func replaceClipScriptMappings(scriptId: String, mappings: [ClipScriptMapping]) async throws {
+        let queue = try q()
+        try await queue.write { db in
+            try db.execute(
+                sql: "DELETE FROM clip_script_mappings WHERE script_id = ?",
+                arguments: [scriptId]
+            )
+            for m in mappings {
+                try db.execute(
+                    sql: """
+                        INSERT INTO clip_script_mappings (clip_id, script_id, scene_number, confidence, mapping_source)
+                        VALUES (?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        m.clipId,
+                        scriptId,
+                        m.sceneNumber,
+                        m.confidence,
+                        m.source.rawValue
+                    ]
+                )
+            }
+        }
     }
 
     private static func decodeClip(from row: Row) throws -> Clip {
@@ -518,6 +676,7 @@ public actor GRDBStore {
             proxyPath: row["proxy_path"],
             proxyStatus: ProxyStatus(rawValue: row["proxy_status"]) ?? .pending,
             proxyChecksum: row["proxy_checksum"],
+            proxyR2URL: row["proxy_r2_url"],
             proxyLUT: row["proxy_lut"],
             proxyColorSpace: row["proxy_color_space"],
             narrativeMeta: try decodeJSON(row["narrative_meta"], as: NarrativeMeta.self),
@@ -548,10 +707,17 @@ public actor GRDBStore {
         guard let mode = ProjectMode(rawValue: row["mode"]) else {
             return nil
         }
+        let burnIn: BurnInConfig?
+        if let payload = row["burn_in_config"] as String?, !payload.isEmpty {
+            burnIn = try? JSONDecoder().decode(BurnInConfig.self, from: Data(payload.utf8))
+        } else {
+            burnIn = nil
+        }
         return WatchFolder(
             path: row["path"],
             projectId: row["project_id"],
-            mode: mode
+            mode: mode,
+            burnInConfig: burnIn
         )
     }
 
@@ -582,7 +748,7 @@ public actor GRDBStore {
     
     // MARK: - Ingest Queue Management
     
-    public struct IngestQueueItem: Codable {
+    public struct IngestQueueItem: Codable, Sendable {
         public let id: String
         public let clipId: String
         public let sourcePath: String
@@ -614,7 +780,7 @@ public actor GRDBStore {
         }
     }
     
-    public enum IngestStage: String, Codable {
+    public enum IngestStage: String, Codable, Sendable {
         case queued, copying, checksumming, proxyPending, proxyActive, syncPending, ready, failed
     }
     
@@ -665,24 +831,30 @@ public actor GRDBStore {
         }
     }
     
-    public func fetchStuckIngestQueue(olderThan time: TimeInterval) async throws -> [IngestQueueItem] {
+    public func fetchStuckIngestQueue(olderThan cutoffTimestamp: TimeInterval) async throws -> [IngestQueueItem] {
         let queue = try q()
         return try await queue.read { db in
-            let stuckStages = ["copying", "checksumming", "proxy_active"]
+            // Must match IngestStage.rawValue written by updateIngestQueueStage (camelCase)
+            let stuckStages = [
+                IngestStage.copying.rawValue,
+                IngestStage.checksumming.rawValue,
+                IngestStage.proxyActive.rawValue
+            ]
             let placeholders = stuckStages.map { _ in "?" }.joined(separator: ",")
-            
+
             let rows = try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT * FROM ingest_queue 
-                    WHERE stage IN (\(placeholders)) 
+                    SELECT * FROM ingest_queue
+                    WHERE stage IN (\(placeholders))
+                    AND stage_started_at IS NOT NULL
                     AND stage_started_at < ?
                     ORDER BY created_at ASC
                 """,
-                arguments: StatementArguments(stuckStages + [time])
+                arguments: StatementArguments(stuckStages + [cutoffTimestamp])
             )
-            
-            return try rows.compactMap { row in
+
+            return rows.compactMap { row in
                 guard let stage = IngestStage(rawValue: row["stage"]) else { return nil }
                 return IngestQueueItem(
                     id: row["id"],
@@ -711,7 +883,7 @@ public actor GRDBStore {
                 arguments: StatementArguments(stageStrings)
             )
             
-            return try rows.compactMap { row in
+            return rows.compactMap { row in
                 guard let stage = IngestStage(rawValue: row["stage"]) else { return nil }
                 return IngestQueueItem(
                     id: row["id"],

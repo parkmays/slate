@@ -1,6 +1,7 @@
 # SLATE AI/ML Engine - User Guide
 
 ## Table of Contents
+
 1. [Overview](#overview)
 2. [Installation](#installation)
 3. [Quick Start](#quick-start)
@@ -16,6 +17,7 @@
 SLATE AI/ML Engine is a powerful, production-ready system for automated video synchronization and AI-powered content analysis. It combines state-of-the-art machine learning with optimized signal processing to deliver professional-grade results.
 
 ### Key Features
+
 - **Audio Synchronization**: Sub-frame accurate sync using multiple algorithms
 - **AI Scoring**: Intelligent content analysis for quality assessment
 - **Audio Role Classification**: Automatic identification of boom, lav, mix, and ISO tracks
@@ -27,6 +29,7 @@ SLATE AI/ML Engine is a powerful, production-ready system for automated video sy
 ## Installation
 
 ### System Requirements
+
 - **macOS**: 14.0 or later
 - **Memory**: 4GB RAM minimum (8GB recommended)
 - **Storage**: 10GB free space
@@ -73,7 +76,7 @@ sudo cp -r config /usr/local/etc/slate/
 
 ### Basic Synchronization
 
-Use the **`SLATESyncEngine`** and **`SLATEAIPipeline`** modules directly from the Swift packages under `packages/`. The snippet below is illustrative; see the package APIs for current types.
+Use the `**SLATESyncEngine**` and `**SLATEAIPipeline**` modules directly from the Swift packages under `packages/`. The snippet below is illustrative; see the package APIs for current types.
 
 ```swift
 import SLATESyncEngine
@@ -168,6 +171,7 @@ let slate = SLATEAPI(configuration: config)
 ### Core Classes
 
 #### SLATEAPI
+
 Main entry point for all SLATE operations.
 
 ```swift
@@ -186,6 +190,7 @@ public struct SLATEAPI {
 ```
 
 #### SyncEngineAPI
+
 Audio synchronization functionality.
 
 ```swift
@@ -201,6 +206,7 @@ public struct SyncEngineAPI {
 ```
 
 #### AIPipelineAPI
+
 AI analysis and scoring.
 
 ```swift
@@ -216,6 +222,7 @@ public struct AIPipelineAPI {
 ### Data Models
 
 #### Clip
+
 Represents a media clip with all metadata.
 
 ```swift
@@ -231,6 +238,7 @@ public struct Clip {
 ```
 
 #### SyncResult
+
 Results of synchronization operation.
 
 ```swift
@@ -242,6 +250,7 @@ public struct SyncResult {
 ```
 
 #### AIScores
+
 AI analysis results.
 
 ```swift
@@ -260,7 +269,7 @@ public struct AIScores {
 ### Performance Optimization
 
 1. **Use Streaming for Large Files**
-   ```swift
+  ```swift
    // Files > 100MB automatically use streaming
    let config = SLATEConfiguration(
        syncEngine: .init(
@@ -269,10 +278,9 @@ public struct AIScores {
            )
        )
    )
-   ```
-
+  ```
 2. **Enable GPU Acceleration**
-   ```json
+  ```json
    {
      "syncEngine": {
        "performance": {
@@ -280,32 +288,30 @@ public struct AIScores {
        }
      }
    }
-   ```
-
+  ```
 3. **Adjust Confidence Thresholds**
-   - High quality footage: 0.9+ threshold
-   - Documentary footage: 0.7+ threshold
-   - Noisy environments: 0.5+ threshold
+  - High quality footage: 0.9+ threshold
+  - Documentary footage: 0.7+ threshold
+  - Noisy environments: 0.5+ threshold
 
 ### Memory Management
 
 1. **Use Object Pools**
-   ```swift
+  ```swift
    // Automatic with default configuration
    let poolManager = await PoolManager.shared
    let stats = await poolManager.getStatistics()
-   ```
-
+  ```
 2. **Monitor Memory Usage**
-   ```swift
+  ```swift
    let status = await slate.getSystemStatus()
    print("Memory usage: \(status.metrics.memoryUsage)")
-   ```
+  ```
 
 ### Error Handling
 
 1. **Always Handle Errors Gracefully**
-   ```swift
+  ```swift
    do {
        let result = try await slate.processClip(...)
    } catch SyncEngineAPI.SyncError.insufficientData {
@@ -315,21 +321,20 @@ public struct AIScores {
    } catch {
        // Handle other errors
    }
-   ```
-
+  ```
 2. **Use Graceful Degradation**
-   ```swift
+  ```swift
    // System automatically falls back when models fail
    let degradation = await aiAPI.getDegradationStatus()
    if degradation.level != .normal {
        print("Using fallback processing")
    }
-   ```
+  ```
 
 ### Batch Processing
 
 1. **Process Multiple Clips Efficiently**
-   ```swift
+  ```swift
    let results = try await withThrowingTaskGroup(of: ProcessedClipResult.self) { group in
        for clip in clips {
            group.addTask {
@@ -338,14 +343,13 @@ public struct AIScores {
        }
        return try await group.reduce(into: []) { $0.append($1) }
    }
-   ```
-
+  ```
 2. **Use Caching for Repeated Analysis**
-   ```swift
+  ```swift
    // Automatic with default configuration
    let cache = await CacheManager.shared.getAIScoreCache()
    // Results are cached for 1 hour by default
-   ```
+  ```
 
 ---
 
@@ -354,28 +358,36 @@ public struct AIScores {
 ### Common Issues
 
 #### Sync Fails with "Insufficient Data"
+
 **Cause**: Audio files too short (< 1 second)
 **Solution**: 
+
 - Ensure audio files are at least 1 second long
 - Check file integrity with `file` command
 
 #### AI Analysis Returns Low Scores
+
 **Cause**: Poor quality video/audio or missing proxy
 **Solution**:
+
 - Verify proxy video exists and is accessible
 - Check video quality (resolution, frame rate)
 - Review confidence metrics in logs
 
 #### Processing is Slow
+
 **Cause**: Insufficient resources or large files
 **Solution**:
+
 - Increase memory limits in configuration
 - Enable GPU acceleration
 - Use streaming for very large files
 
 #### Memory Usage High
+
 **Cause**: Processing multiple large files simultaneously
 **Solution**:
+
 - Reduce `maxConcurrentOperations`
 - Enable object pooling
 - Monitor with `getSystemStatus()`
@@ -408,7 +420,7 @@ print("Cache hit rate: \(status.cacheStatistics.syncCache?.hitRate ?? 0)")
 1. **Check Logs**: `/var/log/slate/engine.log`
 2. **Run Diagnostics**: `slate-engine --diagnostics`
 3. **Review Configuration**: `slate-engine --config-check`
-4. **Contact Support**: support@slate.ai
+4. **Contact Support**: [support@slate.ai](mailto:support@slate.ai)
 
 ---
 
@@ -452,15 +464,18 @@ let result = try await processor.correlateStreaming(...)
 See [CHANGELOG.md](../CHANGELOG.md) for detailed version history.
 
 ### v1.2.0 (Current)
+
 - 50% performance improvement
 - CoreML integration
 - Production-ready features
 
 ### v1.1.0
+
 - Basic sync engine
 - Initial AI pipeline
 
 ### v1.0.0
+
 - Proof of concept
 
 ---
@@ -473,7 +488,8 @@ SLATE AI/ML Engine is licensed under the MIT License. See [LICENSE](../LICENSE) 
 
 ## Support
 
-- **Documentation**: https://docs.slate.ai
-- **GitHub**: https://github.com/slate-ai/slate-engine
-- **Email**: support@slate.ai
-- **Discord**: https://discord.gg/slate
+- **Documentation**: [https://docs.slate.ai](https://docs.slate.ai)
+- **GitHub**: [https://github.com/slate-ai/slate-engine](https://github.com/slate-ai/slate-engine)
+- **Email**: [support@slate.ai](mailto:support@slate.ai)
+- **Discord**: [https://discord.gg/slate](https://discord.gg/slate)
+

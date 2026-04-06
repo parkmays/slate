@@ -8,6 +8,7 @@ struct AssemblyView: View {
     let project: Project
     @ObservedObject var clipStore: GRDBClipStore
 
+    @EnvironmentObject private var supabaseManager: SupabaseManager
     @Environment(\.dismiss) private var dismiss
     @StateObject private var assemblyStore: AssemblyStore
     @State private var assemblyName = ""
@@ -486,9 +487,28 @@ struct AssemblyView: View {
             // Auto-deliver notifications if the project is configured for it.
             // Fires iMessage / email / Slack to the project's notification targets.
             if project.autoDeliverOnAssembly, !project.notificationTargets.isEmpty {
-                // Use the exported file URL as the review link for now.
-                // When the web portal generates a share link, pass that URL here instead.
-                let shareURL = destination
+                // Attempt to generate a web-portal share link via Supabase.
+                // Falls back to the local export file URL if the edge function is unavailable
+                // (e.g. no network, Supabase not configured). Callers see the file URL in
+                // that case — still useful for same-machine workflows.
+                let shareURL: URL
+                if let jwt = supabaseManager.accessToken {
+                    do {
+                        let result = try await ShareLinkService.shared.generateShareLink(
+                            projectId: project.id,
+                            scope: .assembly,
+                            expiryHours: 168,
+                            permissions: .fullAccess,
+                            jwt: jwt
+                        )
+                        shareURL = URL(string: result.url) ?? destination
+                    } catch {
+                        print("[AssemblyView] Share link generation failed, falling back to local path: \(error)")
+                        shareURL = destination
+                    }
+                } else {
+                    shareURL = destination
+                }
                 Task {
                     await NotificationService.shared.deliver(
                         projectName: project.name,

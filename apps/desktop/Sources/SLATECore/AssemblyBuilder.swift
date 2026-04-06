@@ -2,7 +2,7 @@ import Foundation
 import SLATESharedTypes
 
 struct AssemblyBuilder {
-    static func build(project: Project, mode: ProjectMode, clips: [Clip]) async -> Assembly {
+    static func build(project: Project, mode: ProjectMode, clips: [Clip]) async -> AssemblyLayout {
         switch mode {
         case .narrative:
             return await buildNarrativeAssembly(project: project, clips: clips)
@@ -11,17 +11,17 @@ struct AssemblyBuilder {
         }
     }
     
-    private static func buildNarrativeAssembly(project: Project, clips: [Clip]) async -> Assembly {
-        // Group clips by scene -> setup
-        let grouped = Dictionary(grouping: clips) { clip in
+    private static func buildNarrativeAssembly(project: Project, clips: [Clip]) async -> AssemblyLayout {
+        // Group clips by scene -> shot (Swift.Dictionary avoids GRDB's Dictionary overload)
+        let grouped = Swift.Dictionary(grouping: clips) { clip in
             clip.narrativeMeta?.sceneNumber ?? "Unknown"
-        }.mapValues { clips in
-            Dictionary(grouping: clips) { clip in
-                clip.narrativeMeta?.setupName ?? "Unknown"
+        }.mapValues { sceneClips in
+            Swift.Dictionary(grouping: sceneClips) { clip in
+                clip.narrativeMeta?.shotCode ?? "Unknown"
             }
         }
         
-        var items: [AssemblyItem] = []
+        var items: [AssemblyLayoutItem] = []
         var totalDuration: Double = 0
         var gapCount = 0
         var autoSelectedCount = 0
@@ -46,19 +46,19 @@ struct AssemblyBuilder {
                 let selectedClip = selectBestClip(from: setupClips)
                 
                 if let clip = selectedClip {
-                    let item = AssemblyItem(
-                        id: UUID().uuidString,
+                    let item = AssemblyLayoutItem(
+                        id: UUID(),
                         clip: clip,
                         sceneName: scene,
                         setupName: setup,
-                        isAutoSelected: clip.reviewStatus != .circled,
+                        isAutoSelected: clip.reviewStatus != ReviewStatus.circled,
                         isGap: false,
                         sortOrder: items.count
                     )
                     items.append(item)
                     totalDuration += clip.duration
                     
-                    if clip.reviewStatus != .circled {
+                    if clip.reviewStatus != ReviewStatus.circled {
                         autoSelectedCount += 1
                     }
                 } else {
@@ -77,7 +77,7 @@ struct AssemblyBuilder {
                         proxyChecksum: nil,
                         narrativeMeta: NarrativeMeta(
                             sceneNumber: scene,
-                            setupName: setup,
+                            shotCode: setup,
                             takeNumber: 0,
                             cameraId: "GAP"
                         ),
@@ -98,8 +98,8 @@ struct AssemblyBuilder {
                         projectMode: .narrative
                     )
                     
-                    let gapItem = AssemblyItem(
-                        id: UUID().uuidString,
+                    let gapItem = AssemblyLayoutItem(
+                        id: UUID(),
                         clip: gapClip,
                         sceneName: scene,
                         setupName: setup,
@@ -114,10 +114,10 @@ struct AssemblyBuilder {
             }
         }
         
-        return Assembly(
-            id: UUID().uuidString,
+        return AssemblyLayout(
+            id: UUID(),
             projectId: project.id,
-            mode: mode,
+            mode: project.mode,
             items: items,
             totalDuration: totalDuration,
             gapCount: gapCount,
@@ -126,15 +126,15 @@ struct AssemblyBuilder {
         )
     }
     
-    private static func buildDocumentaryAssembly(project: Project, clips: [Clip]) async -> Assembly {
+    private static func buildDocumentaryAssembly(project: Project, clips: [Clip]) async -> AssemblyLayout {
         // Group clips by subject
-        let grouped = Dictionary(grouping: clips) { clip in
+        let grouped = Swift.Dictionary(grouping: clips) { clip in
             clip.documentaryMeta?.subjectName ?? "Unknown"
         }
         
-        var items: [AssemblyItem] = []
+        var items: [AssemblyLayoutItem] = []
         var totalDuration: Double = 0
-        var gapCount = 0
+        let gapCount = 0
         var autoSelectedCount = 0
         
         let sortedSubjects = grouped.keys.sorted()
@@ -142,14 +142,14 @@ struct AssemblyBuilder {
         for subject in sortedSubjects {
             guard let subjectClips = grouped[subject] else { continue }
             
-            // Group by topic tag
-            let topicGroups = Dictionary(grouping: subjectClips) { clip in
-                clip.documentaryMeta?.topicTag ?? "General"
+            // Group by primary topic tag
+            let topicGroups = Swift.Dictionary(grouping: subjectClips) { clip in
+                clip.documentaryMeta?.topicTags.first ?? "General"
             }
             
-            for (topic, clips) in topicGroups {
+            for (topic, topicClips) in topicGroups {
                 // Sort by AI score (composite) within each topic
-                let sortedClips = clips.sorted { clip1, clip2 in
+                let sortedClips = topicClips.sorted { clip1, clip2 in
                     let score1 = clip1.aiScores?.composite ?? 0
                     let score2 = clip2.aiScores?.composite ?? 0
                     return score1 > score2
@@ -157,33 +157,33 @@ struct AssemblyBuilder {
                 
                 // Include circled + flagged, skip x + deprioritized
                 let filteredClips = sortedClips.filter { clip in
-                    clip.reviewStatus != .x && clip.reviewStatus != .deprioritized
+                    clip.reviewStatus != ReviewStatus.x && clip.reviewStatus != ReviewStatus.deprioritized
                 }
                 
                 for clip in filteredClips {
-                    let item = AssemblyItem(
-                        id: UUID().uuidString,
+                    let item = AssemblyLayoutItem(
+                        id: UUID(),
                         clip: clip,
                         sceneName: subject,
                         setupName: topic,
-                        isAutoSelected: clip.reviewStatus != .circled,
+                        isAutoSelected: clip.reviewStatus != ReviewStatus.circled,
                         isGap: false,
                         sortOrder: items.count
                     )
                     items.append(item)
                     totalDuration += clip.duration
                     
-                    if clip.reviewStatus != .circled {
+                    if clip.reviewStatus != ReviewStatus.circled {
                         autoSelectedCount += 1
                     }
                 }
             }
         }
         
-        return Assembly(
-            id: UUID().uuidString,
+        return AssemblyLayout(
+            id: UUID(),
             projectId: project.id,
-            mode: mode,
+            mode: project.mode,
             items: items,
             totalDuration: totalDuration,
             gapCount: gapCount,
@@ -195,11 +195,11 @@ struct AssemblyBuilder {
     private static func selectBestClip(from clips: [Clip]) -> Clip? {
         // Filter out x and deprioritized
         let eligibleClips = clips.filter { clip in
-            clip.reviewStatus != .x && clip.reviewStatus != .deprioritized
+            clip.reviewStatus != ReviewStatus.x && clip.reviewStatus != ReviewStatus.deprioritized
         }
         
         // Prefer circled takes
-        if let circled = eligibleClips.first(where: { $0.reviewStatus == .circled }) {
+        if let circled = eligibleClips.first(where: { $0.reviewStatus == ReviewStatus.circled }) {
             return circled
         }
         
@@ -212,18 +212,18 @@ struct AssemblyBuilder {
     }
 }
 
-struct Assembly: Identifiable {
+struct AssemblyLayout: Identifiable {
     let id: UUID
     let projectId: String
     let mode: ProjectMode
-    var items: [AssemblyItem]
+    var items: [AssemblyLayoutItem]
     var totalDuration: Double
     var gapCount: Int
     var autoSelectedCount: Int
     var createdAt: Date
 }
 
-struct AssemblyItem: Identifiable {
+struct AssemblyLayoutItem: Identifiable {
     let id: UUID
     let clip: Clip
     let sceneName: String

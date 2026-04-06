@@ -19,6 +19,7 @@ public struct SLATEApp: App {
 
     @StateObject private var appState        = AppState()
     @StateObject private var supabaseManager = SupabaseManager()
+    @State private var didSetupApp = false
 
     /// True when the user has explicitly chosen to continue without signing in.
     @State private var offlineOverride = false
@@ -37,8 +38,12 @@ public struct SLATEApp: App {
                         .environmentObject(supabaseManager)
                 }
             }
-            .task {
-                await setupApp()
+            .onAppear {
+                guard !didSetupApp else { return }
+                didSetupApp = true
+                Task {
+                    await setupApp()
+                }
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .continueOffline)

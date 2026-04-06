@@ -79,7 +79,20 @@ public final class ProjectStore: ObservableObject {
 
         projects.insert(project, at: 0)
         activeProject = project
+        ProjectSettingsPersistence.save(project)
         return project
+    }
+
+    /// Persists delivery / digest settings and updates in-memory project lists.
+    public func persistProjectDeliverySettings(_ project: Project, clipStore: GRDBClipStore) {
+        ProjectSettingsPersistence.save(project)
+        clipStore.applyDeliverySettings(project)
+        if let idx = projects.firstIndex(where: { $0.id == project.id }) {
+            projects[idx] = project
+        }
+        if activeProject?.id == project.id {
+            activeProject = project
+        }
     }
 
     public func setActiveProject(_ project: Project) {

@@ -4,8 +4,9 @@ import SLATESharedTypes
 import Vision
 import AVFoundation
 
-/// Manages loading and inference with CoreML models for Phase 2 AI scoring
-public actor CoreMLModelManager {
+/// Manages loading and inference with CoreML models for Phase 2 AI scoring.
+/// `MLModel` is not `Sendable`; a plain class + lock avoids Swift 6 actor isolation issues with CoreML APIs.
+public final class CoreMLModelManager: @unchecked Sendable {
     
     public enum ModelType {
         case visionQuality
@@ -41,9 +42,10 @@ public actor CoreMLModelManager {
         }
     }
     
-    private var visionModel: MLModel?
-    private var audioModel: MLModel?
-    private var performanceModel: MLModel?
+    /// Core ML models are main-thread–friendly reference types; unsafe avoids `NSLock` in async (Swift 6 disallows locking across await).
+    nonisolated(unsafe) private var visionModel: MLModel?
+    nonisolated(unsafe) private var audioModel: MLModel?
+    nonisolated(unsafe) private var performanceModel: MLModel?
     
     private let modelVersion: String
     private let useGPU: Bool
@@ -53,15 +55,15 @@ public actor CoreMLModelManager {
         self.useGPU = useGPU
     }
     
-    /// Load all models asynchronously
+    /// Load all models asynchronously (sequential loads avoid non-Sendable `MLModel` crossing concurrent child tasks).
     public func loadModels() async throws {
-        async let vision = loadModel(.visionQuality)
-        async let audio = loadModel(.audioQuality)
-        async let performance = loadModel(.performance)
+        let vision = try await loadModel(.visionQuality)
+        let audio = try await loadModel(.audioQuality)
+        let performance = try await loadModel(.performance)
         
-        self.visionModel = try await vision
-        self.audioModel = try await audio
-        self.performanceModel = try await performance
+        visionModel = vision
+        audioModel = audio
+        performanceModel = performance
         
         print("CoreML models loaded successfully (version: \(modelVersion))")
     }
@@ -71,7 +73,7 @@ public actor CoreMLModelManager {
         // Try to load from bundle first
         if let modelURL = Bundle.module.url(forResource: type.filename.replacingOccurrences(of: ".mlmodel", with: ""), withExtension: "mlmodel") {
             do {
-                let compiledURL = try MLModel.compileModel(at: modelURL)
+                let compiledURL = try await MLModel.compileModel(at: modelURL)
                 let configuration = MLModelConfiguration()
                 configuration.computeUnits = useGPU ? .cpuAndGPU : .cpuOnly
                 return try MLModel(contentsOf: compiledURL, configuration: configuration)
@@ -101,7 +103,7 @@ public actor CoreMLModelManager {
         
         do {
             let input = try createVisionInput(from: features)
-            let output = try model.prediction(from: input)
+            let output = try await model.prediction(from: input)
             
             return parseVisionOutput(output)
         } catch {
@@ -113,10 +115,10 @@ public actor CoreMLModelManager {
         var inputDict: [String: Any] = [:]
         
         // Convert vision features to model input format
-        inputDict["focus_measure"] = MLMultiArray(shape: [1, 1], dataType: .float32)
-        inputDict["exposure_histogram"] = MLMultiArray(shape: [1, 256], dataType: .float32)
-        inputDict["motion_vectors"] = MLMultiArray(shape: [1, 20, 2], dataType: .float32)
-        inputDict["sharpness_map"] = MLMultiArray(shape: [1, 64, 64], dataType: .float32)
+        inputDict["focus_measure"] = try MLMultiArray(shape: [1, 1], dataType: .float32)
+        inputDict["exposure_histogram"] = try MLMultiArray(shape: [1, 256], dataType: .float32)
+        inputDict["motion_vectors"] = try MLMultiArray(shape: [1, 20, 2], dataType: .float32)
+        inputDict["sharpness_map"] = try MLMultiArray(shape: [1, 64, 64], dataType: .float32)
         
         // Fill arrays with actual feature values
         try fillVisionArrays(inputDict, with: features)
@@ -170,7 +172,7 @@ public actor CoreMLModelManager {
         if confidence < 0.7 {
             reasons.append(ScoreReason(
                 dimension: "vision",
-                score: Int((focus + exposure + stability) / 3),
+                score: (focus + exposure + stability) / 3,
                 flag: .warning,
                 message: "Low confidence in CoreML prediction (\(String(format: "%.2f", confidence)))"
             ))
@@ -193,7 +195,7 @@ public actor CoreMLModelManager {
         
         do {
             let input = try createAudioInput(from: features)
-            let output = try model.prediction(from: input)
+            let output = try await model.prediction(from: input)
             
             return parseAudioOutput(output)
         } catch {
@@ -204,10 +206,10 @@ public actor CoreMLModelManager {
     private func createAudioInput(from features: AudioFeatures) throws -> MLFeatureProvider {
         var inputDict: [String: Any] = [:]
         
-        inputDict["mfcc_features"] = MLMultiArray(shape: [1, 13, 100], dataType: .float32)
-        inputDict["spectral_centroid"] = MLMultiArray(shape: [1, 100], dataType: .float32)
-        inputDict["zero_crossing_rate"] = MLMultiArray(shape: [1, 100], dataType: .float32)
-        inputDict["rms_energy"] = MLMultiArray(shape: [1, 100], dataType: .float32)
+        inputDict["mfcc_features"] = try MLMultiArray(shape: [1, 13, 100], dataType: .float32)
+        inputDict["spectral_centroid"] = try MLMultiArray(shape: [1, 100], dataType: .float32)
+        inputDict["zero_crossing_rate"] = try MLMultiArray(shape: [1, 100], dataType: .float32)
+        inputDict["rms_energy"] = try MLMultiArray(shape: [1, 100], dataType: .float32)
         
         try fillAudioArrays(inputDict, with: features)
         
@@ -238,7 +240,7 @@ public actor CoreMLModelManager {
         if confidence < 0.7 {
             reasons.append(ScoreReason(
                 dimension: "audio",
-                score: Int(audio),
+                score: audio,
                 flag: .warning,
                 message: "Low confidence in CoreML prediction"
             ))
@@ -252,14 +254,14 @@ public actor CoreMLModelManager {
     
     // MARK: - Performance Scoring
     
-    public func scorePerformanceFeatures(_ features: PerformanceFeatures) async throws -> PerformanceScoreResult {
+    public func scorePerformanceFeatures(_ features: PerformanceFeatures) async throws -> CoreMLPerformanceScoreResult {
         guard let model = performanceModel else {
             throw ModelError.modelNotLoaded
         }
         
         do {
             let input = try createPerformanceInput(from: features)
-            let output = try model.prediction(from: input)
+            let output = try await model.prediction(from: input)
             
             return parsePerformanceOutput(output)
         } catch {
@@ -270,10 +272,10 @@ public actor CoreMLModelManager {
     private func createPerformanceInput(from features: PerformanceFeatures) throws -> MLFeatureProvider {
         var inputDict: [String: Any] = [:]
         
-        inputDict["dialogue_clarity"] = MLMultiArray(shape: [1], dataType: .float32)
-        inputDict["emotional_engagement"] = MLMultiArray(shape: [1], dataType: .float32)
-        inputDict["technical_quality"] = MLMultiArray(shape: [1], dataType: .float32)
-        inputDict["pacing_rhythm"] = MLMultiArray(shape: [1], dataType: .float32)
+        inputDict["dialogue_clarity"] = try MLMultiArray(shape: [1], dataType: .float32)
+        inputDict["emotional_engagement"] = try MLMultiArray(shape: [1], dataType: .float32)
+        inputDict["technical_quality"] = try MLMultiArray(shape: [1], dataType: .float32)
+        inputDict["pacing_rhythm"] = try MLMultiArray(shape: [1], dataType: .float32)
         
         // Fill arrays
         if let array = inputDict["dialogue_clarity"] as? MLMultiArray {
@@ -292,10 +294,10 @@ public actor CoreMLModelManager {
         return try MLDictionaryFeatureProvider(dictionary: inputDict)
     }
     
-    private func parsePerformanceOutput(_ output: MLFeatureProvider) -> PerformanceScoreResult {
+    private func parsePerformanceOutput(_ output: MLFeatureProvider) -> CoreMLPerformanceScoreResult {
         let composite = (output.featureValue(for: "composite_score")?.doubleValue ?? 0) * 100
-        
-        return PerformanceScoreResult(
+
+        return CoreMLPerformanceScoreResult(
             composite: composite,
             breakdown: PerformanceBreakdown(
                 dialogueClarity: (output.featureValue(for: "dialogue_clarity_score")?.doubleValue ?? 0) * 100,
@@ -309,7 +311,7 @@ public actor CoreMLModelManager {
 
 // MARK: - Feature Structures
 
-public struct VisionFeatures {
+public struct VisionFeatures: Sendable {
     public let focusMeasure: Float
     public let exposureHistogram: [Float]
     public let motionVectors: [(dx: Float, dy: Float)]
@@ -323,7 +325,7 @@ public struct VisionFeatures {
     }
 }
 
-public struct AudioFeatures {
+public struct AudioFeatures: Sendable {
     public let mfccFeatures: [[Float]]
     public let spectralCentroid: [Float]
     public let zeroCrossingRate: [Float]
@@ -337,7 +339,7 @@ public struct AudioFeatures {
     }
 }
 
-public struct PerformanceFeatures {
+public struct PerformanceFeatures: Sendable {
     public let dialogueClarity: Float
     public let emotionalEngagement: Float
     public let technicalQuality: Float
@@ -353,12 +355,7 @@ public struct PerformanceFeatures {
 
 // MARK: - Additional Result Types
 
-public struct AudioScoreResult {
-    public let audio: Double
-    public let reasons: [ScoreReason]
-}
-
-public struct PerformanceScoreResult {
+public struct CoreMLPerformanceScoreResult {
     public let composite: Double
     public let breakdown: PerformanceBreakdown
 }

@@ -1,5 +1,7 @@
 import Foundation
 
+private final class SLATEConfigurationBundleToken {}
+
 /// Centralized configuration management for SLATE components
 public struct SLATEConfiguration: Codable, Sendable {
     
@@ -302,7 +304,7 @@ public struct SLATEConfiguration: Codable, Sendable {
         }
     }
     
-    public enum WhisperModel: String, Codable, CaseIterable {
+    public enum WhisperModel: String, Codable, CaseIterable, Sendable {
         case tiny = "tiny"
         case base = "base"
         case small = "small"
@@ -466,9 +468,11 @@ public struct SLATEConfiguration: Codable, Sendable {
             self.maxFiles = maxFiles
             self.enableMetrics = enableMetrics
         }
+        
+        public static let `default` = SLATEConfiguration.Logging()
     }
     
-    public enum LogLevel: String, Codable, CaseIterable {
+    public enum LogLevel: String, Codable, CaseIterable, Sendable {
         case debug = "debug"
         case info = "info"
         case warning = "warning"
@@ -509,7 +513,8 @@ public struct SLATEConfiguration: Codable, Sendable {
     
     /// Load configuration from bundle
     public static func loadFromBundle(name: String = "slate-config") throws -> SLATEConfiguration {
-        guard let url = Bundle.module.url(forResource: name, withExtension: "json") else {
+        let bundle = Bundle(for: SLATEConfigurationBundleToken.self)
+        guard let url = bundle.url(forResource: name, withExtension: "json") else {
             throw ConfigurationError.fileNotFound(name)
         }
         return try load(from: url)
@@ -543,7 +548,7 @@ public enum ConfigurationError: Error, LocalizedError {
 /// Global configuration manager
 public actor ConfigurationManager {
     
-    private static var shared: ConfigurationManager?
+    nonisolated(unsafe) private static var sharedInstance: ConfigurationManager?
     
     private var configuration: SLATEConfiguration
     
@@ -553,19 +558,21 @@ public actor ConfigurationManager {
     
     /// Get shared configuration manager
     public static func shared() -> ConfigurationManager {
-        if let shared = shared {
-            return shared
+        if let existing = sharedInstance {
+            return existing
         }
         let config = SLATEConfiguration.default
-        shared = ConfigurationManager(configuration: config)
-        return shared!
+        let manager = ConfigurationManager(configuration: config)
+        sharedInstance = manager
+        return manager
     }
     
     /// Load configuration from file
     public static func load(from url: URL) throws -> ConfigurationManager {
         let configuration = try SLATEConfiguration.load(from: url)
-        shared = ConfigurationManager(configuration: configuration)
-        return shared!
+        let manager = ConfigurationManager(configuration: configuration)
+        sharedInstance = manager
+        return manager
     }
     
     /// Get current configuration
@@ -611,7 +618,7 @@ extension SLATEConfiguration.SyncEngine {
     }
 }
 
-extension SLATEConfiguration.AIPipeline.VisionSettings {
+extension SLATEConfiguration.VisionSettings {
     /// Determine sample rate based on duration
     public func sampleRate(for duration: Double) -> Double {
         if duration > adaptiveSamplingThreshold {

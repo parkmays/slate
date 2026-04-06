@@ -4,20 +4,30 @@ import SLATESharedTypes
 
 @main
 struct IngestDaemonCLI {
+    /// Keeps the Mach XPC listener alive for the lifetime of the process.
+    private static var xpcListener: IngestXPCListener?
+
     static func main() async throws {
         let options = CLIOptions(arguments: Array(CommandLine.arguments.dropFirst()))
         let daemon = try IngestDaemon(dbPath: options.dbPath)
+
+        let listener = IngestXPCListener(daemon: daemon)
+        listener.start()
+        Self.xpcListener = listener
+        print("XPC listener started (\(IngestXPCListener.serviceName))")
 
         if let watchFolder = options.watchFolder,
            let projectId = options.projectId,
            let mode = options.mode {
             try await daemon.addWatchFolder(
-                WatchFolderConfig(path: watchFolder, projectId: projectId, mode: mode)
+                WatchFolder(path: watchFolder, projectId: projectId, mode: mode)
             )
             print("Watching \(watchFolder) for project \(projectId)")
         } else {
             print("SLATE ingest daemon initialized without a watch folder.")
         }
+
+        await daemon.resumeInterruptedIngests()
 
         while true {
             try await Task.sleep(nanoseconds: 1_000_000_000)

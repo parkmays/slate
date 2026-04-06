@@ -8,14 +8,63 @@
 // Output: ~/Movies/SLATE/{project}/Proxies/{clipId}.mp4 + .m3u8
 
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import VideoToolbox
 import GRDB
 import SLATEAIPipeline
 import SLATESharedTypes
 
+// Reader/writer objects are used only on their dedicated serial queues.
+private final class VideoEncodeState: @unchecked Sendable {
+    let output: AVAssetReaderTrackOutput
+    let input: AVAssetWriterInput
+    let lut: ProxyLUT
+    let clipId: String
+    let totalFrames: Int
+    let clip: Clip
+    let burnInConfig: BurnInConfig
+    let proxyWidth: Int
+    let proxyHeight: Int
+    var frameCount = 0
+    var finished = false
+
+    init(
+        output: AVAssetReaderTrackOutput,
+        input: AVAssetWriterInput,
+        lut: ProxyLUT,
+        clipId: String,
+        totalFrames: Int,
+        clip: Clip,
+        burnInConfig: BurnInConfig,
+        proxyWidth: Int,
+        proxyHeight: Int
+    ) {
+        self.output = output
+        self.input = input
+        self.lut = lut
+        self.clipId = clipId
+        self.totalFrames = totalFrames
+        self.clip = clip
+        self.burnInConfig = burnInConfig
+        self.proxyWidth = proxyWidth
+        self.proxyHeight = proxyHeight
+    }
+}
+
+private final class AudioEncodeState: @unchecked Sendable {
+    let output: AVAssetReaderTrackOutput
+    let input: AVAssetWriterInput
+    var finished = false
+
+    init(output: AVAssetReaderTrackOutput, input: AVAssetWriterInput) {
+        self.output = output
+        self.input = input
+    }
+}
+
 public actor ProxyGenerator {
     private let dbQueue: DatabaseQueue
+    private let r2Uploader = R2Uploader()
     private var processingQueue: [String: Task<Void, Error>] = [:]
     
     public init(dbQueue: DatabaseQueue) {
@@ -23,7 +72,7 @@ public actor ProxyGenerator {
     }
     
     /// Generate proxy for a clip
-    public func generateProxy(for clip: Clip) async throws {
+    public func generateProxy(for clip: Clip, burnInConfig: BurnInConfig = BurnInConfig()) async throws {
         // Skip if already processing
         if processingQueue[clip.id] != nil {
             return
@@ -31,14 +80,14 @@ public actor ProxyGenerator {
         
         let task = Task {
             defer { processingQueue.removeValue(forKey: clip.id) }
-            try await performProxyGeneration(clip: clip)
+            try await performProxyGeneration(clip: clip, burnInConfig: burnInConfig)
         }
         
         processingQueue[clip.id] = task
         try await task.value
     }
     
-    private func performProxyGeneration(clip: Clip) async throws {
+    private func performProxyGeneration(clip: Clip, burnInConfig: BurnInConfig) async throws {
         let sourceURL = URL(fileURLWithPath: clip.sourcePath)
         let proxyDir = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Movies/SLATE")
@@ -140,7 +189,7 @@ public actor ProxyGenerator {
             
             // Audio input (if present)
             var audioInput: AVAssetWriterInput?
-            if let audioTrack = audioTrack {
+            if audioTrack != nil {
                 let audioSettings: [String: Any] = [
                     AVFormatIDKey: kAudioFormatMPEG4AAC,
                     AVNumberOfChannelsKey: 2,
@@ -148,11 +197,10 @@ public actor ProxyGenerator {
                     AVEncoderBitRateKey: 128_000
                 ]
                 
-                audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
-                audioInput?.expectsMediaDataInRealTime = false
-                if let audioInput = audioInput {
-                    writer.add(audioInput)
-                }
+                let writerAudioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+                writerAudioInput.expectsMediaDataInRealTime = false
+                writer.add(writerAudioInput)
+                audioInput = writerAudioInput
             }
             
             // Start reader and writer
@@ -160,42 +208,68 @@ public actor ProxyGenerator {
             reader.startReading()
             writer.startSession(atSourceTime: .zero)
             
-            // Process video frames
-            var frameCount = 0
-            var totalFrames = 0
+            // Process video frames (mutable state lives in @unchecked Sendable boxes; each queue is serial).
             let duration = try await asset.load(.duration)
             let nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
-            totalFrames = Int(CMTimeGetSeconds(duration) * nominalFrameRate)
-            
-            var videoCompleted = false
-            var audioCompleted = audioTrack == nil
+            let totalFrames = max(
+                Int(CMTimeGetSeconds(duration) * Double(nominalFrameRate)),
+                1
+            )
             
             let processingGroup = DispatchGroup()
-            let videoQueue = DispatchQueue(label: "video.queue")
-            let audioQueue = DispatchQueue(label: "audio.queue")
+            let videoQueue = DispatchQueue(label: "com.slate.proxy.video")
+            let audioQueue = DispatchQueue(label: "com.slate.proxy.audio")
             
-            // Video processing
+            // Video processing (box AV objects before the queue; closure only captures Sendable boxes).
+            let videoState = VideoEncodeState(
+                output: videoOutput,
+                input: videoInput,
+                lut: selectedLUT,
+                clipId: clip.id,
+                totalFrames: totalFrames,
+                clip: clip,
+                burnInConfig: burnInConfig,
+                proxyWidth: proxyWidth,
+                proxyHeight: proxyHeight
+            )
             processingGroup.enter()
-            videoQueue.async {
-                while !videoCompleted {
+            videoQueue.async { [videoState] in
+                let state = videoState
+                while !state.finished {
                     autoreleasepool {
-                        if let sampleBuffer = videoOutput.copyNextSampleBuffer() {
-                            // Apply the appropriate viewing LUT (nil → pass-through, keep original).
-                            let processedBuffer = LUTManager.applyProxyLUT(to: sampleBuffer, lut: selectedLUT) ?? sampleBuffer
-                            
-                            if !videoInput.append(processedBuffer) {
+                        if let sampleBuffer = state.output.copyNextSampleBuffer() {
+                            let processedBuffer = LUTManager.applyProxyLUT(to: sampleBuffer, lut: state.lut) ?? sampleBuffer
+                            var bufferToAppend = processedBuffer
+                            if state.burnInConfig.enabled,
+                               let pb = CMSampleBufferGetImageBuffer(bufferToAppend) {
+                                let renderer = BurnInRenderer()
+                                let tc = renderer.timecodeString(
+                                    startTC: state.clip.sourceTimecodeStart,
+                                    frameNumber: state.frameCount,
+                                    fps: state.clip.sourceFps
+                                )
+                                let meta = ProxyGenerator.buildMetadataLine(clip: state.clip)
+                                if let burned = renderer.renderBurnIn(
+                                    pixelBuffer: pb,
+                                    timecodeString: tc,
+                                    metadataLine: meta,
+                                    config: state.burnInConfig,
+                                    outputWidth: state.proxyWidth,
+                                    outputHeight: state.proxyHeight
+                                ),
+                                let rebuilt = LUTManager.sampleBuffer(wrapping: burned, timingFrom: bufferToAppend) {
+                                    bufferToAppend = rebuilt
+                                }
+                            }
+                            if !state.input.append(bufferToAppend) {
                                 print("Failed to append video sample")
                             }
-                            frameCount += 1
-                            
-                            // Update progress
-                            Task {
-                                let progress = Double(frameCount) / Double(totalFrames)
-                                try? await self.updateProxyProgress(clipId: clip.id, progress: progress)
-                            }
+                            state.frameCount += 1
+                            let progress = Double(state.frameCount) / Double(state.totalFrames)
+                            print("Proxy progress for \(state.clipId): \(progress * 100)%")
                         } else {
-                            videoCompleted = true
-                            videoInput.markAsFinished()
+                            state.finished = true
+                            state.input.markAsFinished()
                             processingGroup.leave()
                         }
                     }
@@ -203,19 +277,20 @@ public actor ProxyGenerator {
             }
             
             // Audio processing
-            if let audioOutput = audioOutput, let audioInput = audioInput {
+            if let audioOutput = audioOutput, let audioWriterInput = audioInput {
+                let audioState = AudioEncodeState(output: audioOutput, input: audioWriterInput)
                 processingGroup.enter()
-                audioQueue.async {
-                    var audioCompleted = false
-                    while !audioCompleted {
+                audioQueue.async { [audioState] in
+                    let state = audioState
+                    while !state.finished {
                         autoreleasepool {
-                            if let sampleBuffer = audioOutput.copyNextSampleBuffer() {
-                                if !audioInput.append(sampleBuffer) {
+                            if let sampleBuffer = state.output.copyNextSampleBuffer() {
+                                if !state.input.append(sampleBuffer) {
                                     print("Failed to append audio sample")
                                 }
                             } else {
-                                audioCompleted = true
-                                audioInput.markAsFinished()
+                                state.finished = true
+                                state.input.markAsFinished()
                                 processingGroup.leave()
                             }
                         }
@@ -223,8 +298,12 @@ public actor ProxyGenerator {
                 }
             }
             
-            // Wait for completion
-            processingGroup.wait()
+            // Wait for completion (async-safe vs DispatchGroup.wait)
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                processingGroup.notify(queue: DispatchQueue.global(qos: .userInitiated)) {
+                    continuation.resume()
+                }
+            }
             
             // Finish writing
             await writer.finishWriting()
@@ -246,18 +325,16 @@ public actor ProxyGenerator {
                 proxyHeight: proxyHeight
             )
             
-            // Canonical R2 key — must match storage.md convention: {projectId}/{clipId}/proxy.mp4
-            let canonicalR2Key = "\(clip.projectId)/\(clip.id)/proxy.mp4"
-
             // Update database
             try await updateClipAfterProxyGeneration(
                 clipId: clip.id,
                 proxyPath: proxyURL.path,
                 proxyChecksum: proxyChecksum,
-                proxyR2Key: canonicalR2Key,
                 proxyLUT: selectedLUT.rawValue,
                 proxyColorSpace: proxyColorSpace
             )
+
+            await uploadProxyToR2(clip: clip, proxyURL: proxyURL, playlistURL: playlistURL)
             
             // Trigger next steps
             await triggerSyncAndAI(clip: clip)
@@ -280,7 +357,7 @@ public actor ProxyGenerator {
         
         var playlist = "#EXTM3U\n"
         playlist += "#EXT-X-VERSION:3\n"
-        playlist += "#EXT-X-TARGETDURATION:\(Int(durationSeconds))\"
+        playlist += "#EXT-X-TARGETDURATION:\(Int(durationSeconds))\n"
         playlist += "#EXT-X-MEDIA-SEQUENCE:0\n"
         playlist += "#EXTINF:\(String(format: "%.3f", durationSeconds)),\n"
         playlist += videoURL.lastPathComponent + "\n"
@@ -290,11 +367,15 @@ public actor ProxyGenerator {
     }
     
     private func updateClipStatus(clipId: String, status: ProxyStatus) async throws {
+        let now = ISO8601DateFormatter().string(from: Date())
         try await dbQueue.write { db in
-            try Clip.filter(Column("id") == clipId).updateAll(
-                db,
-                Column("proxy_status") <- status.rawValue,
-                Column("updated_at") <- Date()
+            try db.execute(
+                sql: """
+                    UPDATE clips
+                    SET proxy_status = ?, updated_at = ?
+                    WHERE id = ?
+                """,
+                arguments: [status.rawValue, now, clipId]
             )
         }
     }
@@ -308,51 +389,118 @@ public actor ProxyGenerator {
         clipId: String,
         proxyPath: String,
         proxyChecksum: String,
-        proxyR2Key: String,
         proxyLUT: String,
         proxyColorSpace: String
     ) async throws {
+        let now = ISO8601DateFormatter().string(from: Date())
         try await dbQueue.write { db in
-            try Clip.filter(Column("id") == clipId).updateAll(
-                db,
-                Column("proxy_status")      <- ProxyStatus.ready.rawValue,
-                Column("proxy_path")        <- proxyPath,
-                Column("proxy_checksum")    <- proxyChecksum,
-                Column("proxy_r2_key")      <- proxyR2Key,
-                Column("proxy_lut")         <- proxyLUT,
-                Column("proxy_color_space") <- proxyColorSpace,
-                Column("proxy_generated_at") <- Date(),
-                Column("updated_at")        <- Date()
+            try db.execute(
+                sql: """
+                    UPDATE clips
+                    SET proxy_status = ?,
+                        proxy_path = ?,
+                        proxy_checksum = ?,
+                        proxy_lut = ?,
+                        proxy_color_space = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                """,
+                arguments: [
+                    ProxyStatus.ready.rawValue,
+                    proxyPath,
+                    proxyChecksum,
+                    proxyLUT,
+                    proxyColorSpace,
+                    now,
+                    clipId
+                ]
             )
         }
     }
     
-    private func triggerSyncAndAI(clip: Clip) async {
-        // Fire AI scoring as a non-blocking background task.
-        // The proxy file is on disk at this point, so the vision scorer can sample frames.
-        // Errors are logged but do not fail the ingest — AI scores are advisory.
-        Task.detached(priority: .background) {
+    /// Uploads proxy MP4, HLS playlist, and thumbnail to Cloudflare R2. Failures are logged; local `ready` proxy remains valid.
+    private func uploadProxyToR2(clip: Clip, proxyURL: URL, playlistURL: URL) async {
+        guard R2Credentials.loadFromKeychain() != nil else {
+            print("[ProxyGenerator] R2 Keychain credentials not found; skipping remote upload for \(clip.id)")
+            return
+        }
+
+        do {
+            try await updateClipStatus(clipId: clip.id, status: .uploading)
+        } catch {
+            print("[ProxyGenerator] Could not set proxy_status to uploading for \(clip.id): \(error)")
+            return
+        }
+
+        let prefix = "\(clip.projectId)/\(clip.id)"
+        let mp4Key = "\(prefix)/proxy.mp4"
+        let m3u8Key = "\(prefix)/proxy.m3u8"
+        let thumbKey = "\(prefix)/proxy_thumb.jpg"
+
+        let publicMP4: String
+        do {
+            publicMP4 = try await r2Uploader.upload(localURL: proxyURL, r2Key: mp4Key, contentType: "video/mp4")
+            _ = try await r2Uploader.upload(localURL: playlistURL, r2Key: m3u8Key, contentType: "application/x-mpegURL")
+
+            let thumbURL = try await r2Uploader.generateThumbnail(proxyURL: proxyURL)
+            defer { try? FileManager.default.removeItem(at: thumbURL) }
+            _ = try await r2Uploader.upload(localURL: thumbURL, r2Key: thumbKey, contentType: "image/jpeg")
+        } catch {
+            print("[ProxyGenerator] R2 upload failed for \(clip.id): \(error)")
             do {
-                let scores = try await AIPipeline().scoreClip(clip)
-                // Persist scores back to GRDB using a plain write so we stay off the actor.
-                try await self.dbQueue.write { db in
-                    let encoder = JSONEncoder()
-                    encoder.outputFormatting = .sortedKeys
-                    let scoresJSON = (try? encoder.encode(scores)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                    let now = ISO8601DateFormatter().string(from: Date())
-                    try db.execute(
-                        sql: """
-                            UPDATE clips
-                            SET ai_scores = ?, ai_processing_status = 'ready', updated_at = ?
-                            WHERE id = ?
-                        """,
-                        arguments: [scoresJSON, now, clip.id]
-                    )
-                }
-                print("[ProxyGenerator] AI scoring complete for \(clip.id). Composite: \(scores.composite)")
+                try await updateClipStatus(clipId: clip.id, status: .ready)
             } catch {
-                print("[ProxyGenerator] AI scoring failed for \(clip.id): \(error)")
+                print("[ProxyGenerator] Could not restore proxy_status to ready after R2 failure: \(error)")
             }
+            return
+        }
+
+        do {
+            try await GRDBStore.shared.markProxyUploaded(clipId: clip.id, publicURL: publicMP4)
+        } catch {
+            print("[ProxyGenerator] R2 objects uploaded but GRDB markProxyUploaded failed for \(clip.id): \(error)")
+        }
+    }
+
+    private func triggerSyncAndAI(clip: Clip) async {
+        // Fire AI scoring as a non-blocking background task (stays on this actor; no detached hop).
+        Task(priority: .background) {
+            await self.performAIScoring(clip: clip)
+        }
+    }
+
+    /// Narrative: slate-style scene / shot / take / camera line. Documentary: subject + session.
+    private nonisolated static func buildMetadataLine(clip: Clip) -> String {
+        switch clip.projectMode {
+        case .narrative:
+            guard let n = clip.narrativeMeta else { return "" }
+            return "SC: \(n.sceneNumber)  SH: \(n.shotCode)  TK: \(n.takeNumber)  CAM: \(n.cameraId)"
+        case .documentary:
+            guard let d = clip.documentaryMeta else { return "" }
+            return "SUBJECT: \(d.subjectName) — \(d.sessionLabel)"
+        }
+    }
+
+    private func performAIScoring(clip: Clip) async {
+        do {
+            let scores = try await AIPipeline().scoreClip(clip)
+            try await dbQueue.write { db in
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = .sortedKeys
+                let scoresJSON = (try? encoder.encode(scores)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                let now = ISO8601DateFormatter().string(from: Date())
+                try db.execute(
+                    sql: """
+                        UPDATE clips
+                        SET ai_scores = ?, ai_processing_status = 'ready', updated_at = ?
+                        WHERE id = ?
+                    """,
+                    arguments: [scoresJSON, now, clip.id]
+                )
+            }
+            print("[ProxyGenerator] AI scoring complete for \(clip.id). Composite: \(scores.composite)")
+        } catch {
+            print("[ProxyGenerator] AI scoring failed for \(clip.id): \(error)")
         }
     }
 }

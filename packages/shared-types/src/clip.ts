@@ -110,6 +110,8 @@ export interface Annotation {
   /** UUID */
   userId: string;
   userDisplayName: string;
+  /** Provenance — e.g. `SoundReport` for mixer log imports */
+  source?: string | null;
   /** HH:MM:SS:FF */
   timecodeIn: string;
   /** HH:MM:SS:FF — null if point annotation */

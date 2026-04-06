@@ -11,7 +11,7 @@ public struct ClipAnalysisResult: Sendable {
     }
 }
 
-public struct AIPipeline: Sendable {
+public final class AIPipeline {
     private let visionScorer: VisionScorer
     private let audioScorer: AudioScorer
     private let transcriptionService: TranscriptionService
@@ -36,7 +36,6 @@ public struct AIPipeline: Sendable {
     }
 
     public func analyzeClip(_ clip: Clip) async throws -> ClipAnalysisResult {
-        let startTime = CFAbsoluteTimeGetCurrent()
         var focus = 0.0
         var exposure = 0.0
         var stability = 0.0
@@ -132,10 +131,11 @@ public struct AIPipeline: Sendable {
             let transcriptTime = CFAbsoluteTimeGetCurrent() - transcriptStart
             
             // Track transcription confidence
-            if let confidence = transcript?.averageConfidence {
+            if let transcript {
+                let tConfidence = transcript.words.isEmpty ? 0.5 : 0.85
                 confidenceTracker.recordTranscriptionInference(
                     modelVersion: "whisper-v1",
-                    confidence: confidence,
+                    confidence: tConfidence,
                     processingTime: transcriptTime,
                     inputSize: audioInputSize
                 )
@@ -151,8 +151,6 @@ public struct AIPipeline: Sendable {
             )
         }
 
-        let totalProcessingTime = CFAbsoluteTimeGetCurrent() - startTime
-        
         let weightedVision = (focus * 0.35) + (exposure * 0.35) + (stability * 0.30)
         let composite = max(0, min(100, (weightedVision * 0.70) + (audio * 0.30)))
 
@@ -266,6 +264,10 @@ public struct AIPipeline: Sendable {
             return baseModelVersion
         }
         return "\(baseModelVersion)+\(performanceModelVersion)"
+    }
+
+    public func getPerformanceReport() -> PerformanceReport {
+        confidenceTracker.getPerformanceMetrics()
     }
 }
 

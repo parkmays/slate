@@ -1,7 +1,31 @@
 import Foundation
+import Accelerate
+import CoreGraphics
+import CoreML
+
+/// Holds a pooled `vImage_Buffer` (reference type wrapper for `ObjectPool`).
+public final class VImageBufferBox: NSObject {
+    public var buffer: vImage_Buffer
+    
+    public init(buffer: vImage_Buffer) {
+        self.buffer = buffer
+        super.init()
+    }
+}
+
+/// Holds pooled FFT setup (reference type wrapper for `ObjectPool`).
+public final class FFTSetupBox: NSObject {
+    public let setup: FFTSetup
+    
+    public init(setup: FFTSetup) {
+        self.setup = setup
+        super.init()
+    }
+}
 
 /// Generic object pool for memory-efficient reuse of expensive objects
-public actor ObjectPool<T: AnyObject> {
+public final class ObjectPool<T: AnyObject> {
+    private let lock = NSRecursiveLock()
     
     private var available: [T] = []
     private var inUse: Set<ObjectIdentifier> = []
@@ -29,6 +53,8 @@ public actor ObjectPool<T: AnyObject> {
     // MARK: - Pool Operations
     
     public func acquire() -> T {
+        lock.lock()
+        defer { lock.unlock() }
         // Clean up old objects if needed
         if let maxAge = maxAge {
             cleanupOldObjects(olderThan: maxAge)
@@ -53,6 +79,8 @@ public actor ObjectPool<T: AnyObject> {
     }
     
     public func release(_ object: T) {
+        lock.lock()
+        defer { lock.unlock() }
         let id = ObjectIdentifier(object)
         
         // Verify object was from this pool
@@ -79,6 +107,8 @@ public actor ObjectPool<T: AnyObject> {
     // MARK: - Statistics
     
     public var statistics: PoolStatistics {
+        lock.lock()
+        defer { lock.unlock() }
         return PoolStatistics(
             availableCount: available.count,
             inUseCount: inUse.count,
@@ -113,7 +143,7 @@ public actor ObjectPool<T: AnyObject> {
     }
 }
 
-public struct PoolStatistics {
+public struct PoolStatistics: Sendable {
     public let availableCount: Int
     public let inUseCount: Int
     public let createdCount: Int
@@ -161,8 +191,8 @@ public actor AudioBufferPool {
         defer { pool.release(nsArray) }
         
         // Ensure array is correct size
-        if nsArray.capacity < size {
-            nsArray.addObjects(from: Array(repeating: 0.0, count: size - nsArray.capacity))
+        if nsArray.count < size {
+            nsArray.addObjects(from: Array(repeating: 0.0, count: size - nsArray.count))
         }
         
         // Convert to Swift array
@@ -184,7 +214,7 @@ public actor AudioBufferPool {
 /// Pool for image buffers
 public actor ImageBufferPool {
     
-    private let pools: [String: ObjectPool<vImage_Buffer>]
+    private let pools: [String: ObjectPool<VImageBufferBox>]
     private let maxImageSize: CGSize
     
     public init(maxImageSize: CGSize = CGSize(width: 4096, height: 4096), maxPoolSize: Int = 20) {
@@ -196,7 +226,7 @@ public actor ImageBufferPool {
             "1920x1080", "2560x1440", "3840x2160"
         ]
         
-        var pools: [String: ObjectPool<vImage_Buffer>] = [:]
+        var pools: [String: ObjectPool<VImageBufferBox>] = [:]
         
         for sizeString in commonSizes {
             let components = sizeString.split(separator: "x").compactMap { Int($0) }
@@ -207,11 +237,11 @@ public actor ImageBufferPool {
                 continue
             }
             
-            pools[sizeString] = ObjectPool<vImage_Buffer>(
+            pools[sizeString] = ObjectPool<VImageBufferBox>(
                 maxSize: maxPoolSize,
-                factory: { createImageBuffer(size: size) },
-                reset: { buffer in
-                    if let data = buffer.data {
+                factory: { VImageBufferBox(buffer: Self.createImageBuffer(size: size)) },
+                reset: { box in
+                    if let data = box.buffer.data {
                         data.deallocate()
                     }
                 }
@@ -221,39 +251,40 @@ public actor ImageBufferPool {
         self.pools = pools
     }
     
-    public func getBuffer(size: CGSize) -> vImage_Buffer? {
+    public func getBuffer(size: CGSize) -> VImageBufferBox? {
         let sizeString = "\(Int(size.width))x\(Int(size.height))"
         
         guard let pool = pools[sizeString] else {
-            // Fallback to direct allocation
-            return createImageBuffer(size: size)
+            return VImageBufferBox(buffer: Self.createImageBuffer(size: size))
         }
         
-        let buffer = pool.acquire()
-        return buffer
+        return pool.acquire()
     }
     
-    public func releaseBuffer(_ buffer: vImage_Buffer, size: CGSize) {
+    public func releaseBuffer(_ box: VImageBufferBox, size: CGSize) {
         let sizeString = "\(Int(size.width))x\(Int(size.height))"
         
         guard let pool = pools[sizeString] else {
-            // Direct deallocation
-            if let data = buffer.data {
+            if let data = box.buffer.data {
                 data.deallocate()
             }
             return
         }
         
-        pool.release(buffer)
+        pool.release(box)
     }
     
     public func withBuffer<R>(size: CGSize, _ body: (vImage_Buffer?) throws -> R) rethrows -> R {
-        let buffer = getBuffer(size: size)
-        defer { releaseBuffer(buffer!, size: size) }
-        return try body(buffer)
+        let box = getBuffer(size: size)
+        defer {
+            if let box {
+                releaseBuffer(box, size: size)
+            }
+        }
+        return try body(box?.buffer)
     }
     
-    private func createImageBuffer(size: CGSize) -> vImage_Buffer {
+    private static func createImageBuffer(size: CGSize) -> vImage_Buffer {
         var buffer = vImage_Buffer()
         let bytesPerPixel = 4 // RGBA
         let rowBytes = Int(size.width) * bytesPerPixel
@@ -263,8 +294,6 @@ public actor ImageBufferPool {
         buffer.height = vImagePixelCount(size.height)
         buffer.width = vImagePixelCount(size.width)
         buffer.rowBytes = rowBytes
-        buffer.bitsPerPixel = 32
-        buffer.colorSpace = CGColorSpaceCreateDeviceRGB()
         
         return buffer
     }
@@ -277,7 +306,7 @@ public actor ImageBufferPool {
 /// Pool for FFT buffers
 public actor FFTBufferPool {
     
-    private let pools: [Int: ObjectPool<FFTSetup>]
+    private let pools: [Int: ObjectPool<FFTSetupBox>]
     private let maxFFTSize: Int
     
     public init(maxFFTSize: Int = 65536, maxPoolSize: Int = 10) {
@@ -285,13 +314,18 @@ public actor FFTBufferPool {
         
         // Create pools for common FFT sizes (powers of 2)
         let commonSizes = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536]
-        var pools: [Int: ObjectPool<FFTSetup>] = [:]
+        var pools: [Int: ObjectPool<FFTSetupBox>] = [:]
         
         for size in commonSizes where size <= maxFFTSize {
-            pools[size] = ObjectPool<FFTSetup>(
+            pools[size] = ObjectPool<FFTSetupBox>(
                 maxSize: maxPoolSize,
-                factory: { createFFTSetup(size: size) },
-                reset: { fftSetup in
+                factory: {
+                    guard let setup = Self.createFFTSetup(size: size) else {
+                        fatalError("Failed to create FFT setup for size \(size)")
+                    }
+                    return FFTSetupBox(setup: setup)
+                },
+                reset: { _ in
                     // FFTSetup doesn't need explicit reset
                 }
             )
@@ -300,41 +334,40 @@ public actor FFTBufferPool {
         self.pools = pools
     }
     
-    public func getSetup(size: Int) -> FFTSetup? {
+    public func getSetup(size: Int) -> FFTSetupBox? {
         // Find next power of 2
         let fftSize = 1 << Int(ceil(log2(Double(size))))
         
         guard let pool = pools[fftSize] else {
-            // Fallback to direct creation
-            return createFFTSetup(size: fftSize)
+            guard let setup = Self.createFFTSetup(size: fftSize) else { return nil }
+            return FFTSetupBox(setup: setup)
         }
         
         return pool.acquire()
     }
     
-    public func releaseSetup(_ setup: FFTSetup, size: Int) {
+    public func releaseSetup(_ box: FFTSetupBox, size: Int) {
         let fftSize = 1 << Int(ceil(log2(Double(size))))
         
         guard let pool = pools[fftSize] else {
-            // Direct deallocation
-            vDSP_destroy_fftsetup(setup)
+            vDSP_destroy_fftsetup(box.setup)
             return
         }
         
-        pool.release(setup)
+        pool.release(box)
     }
     
     public func withSetup<R>(size: Int, _ body: (FFTSetup?) throws -> R) rethrows -> R {
-        let setup = getSetup(size: size)
-        defer { 
-            if let setup = setup {
-                releaseSetup(setup, size: size)
+        let box = getSetup(size: size)
+        defer {
+            if let box {
+                releaseSetup(box, size: size)
             }
         }
-        return try body(setup)
+        return try body(box?.setup)
     }
     
-    private func createFFTSetup(size: Int) -> FFTSetup {
+    private static func createFFTSetup(size: Int) -> FFTSetup? {
         let log2Size = Int(log2(Double(size)))
         return vDSP_create_fftsetup(vDSP_Length(log2Size), FFTRadix(kFFTRadix2))
     }
@@ -481,19 +514,23 @@ public actor PoolManager {
         return newPool
     }
     
-    public func getStatistics() -> PoolStatisticsReport {
+    public func getStatistics() async -> PoolStatisticsReport {
+        var mlBuffers: [String: (input: PoolStatistics, output: PoolStatistics)] = [:]
+        for (name, pool) in mlBufferPools {
+            mlBuffers[name] = await pool.getStatistics()
+        }
         return PoolStatisticsReport(
             audioBuffers: await audioBufferPool?.getStatistics(),
             imageBuffers: await imageBufferPool?.getStatistics(),
             fftBuffers: await fftBufferPool?.getStatistics(),
-            mlBuffers: await mlBufferPools.mapValues { $0.getStatistics() },
+            mlBuffers: mlBuffers,
             genericPoolCount: genericPools.count
         )
     }
     
     public func clearAllPools() async {
         // Clear all pools by creating new ones
-        await audioBufferPool?.getBuffer(size: 1024)
+        _ = await audioBufferPool?.getBuffer(size: 1024)
         await imageBufferPool?.withBuffer(size: CGSize(width: 100, height: 100)) { _ in }
         await fftBufferPool?.withSetup(size: 256) { _ in }
         
@@ -501,7 +538,7 @@ public actor PoolManager {
     }
 }
 
-public struct PoolStatisticsReport {
+public struct PoolStatisticsReport: Sendable {
     public let audioBuffers: [Int: PoolStatistics]?
     public let imageBuffers: [String: PoolStatistics]?
     public let fftBuffers: [Int: PoolStatistics]?

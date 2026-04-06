@@ -85,6 +85,9 @@ struct IngestProgressView: View {
             }
         }
         .frame(width: 520, height: 420)
+        .onAppear {
+            IPCManager.shared.connect()
+        }
     }
 }
 

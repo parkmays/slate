@@ -1,7 +1,9 @@
 // SLATE — SidebarView
 // Owned by: Claude Code
 
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import SLATECore
 import SLATESharedTypes
 
@@ -13,6 +15,9 @@ public struct SidebarView: View {
     @State private var searchText = ""
     @State private var showingNewProjectSheet = false
     @State private var watchFolderProject: Project?
+    @State private var soundReportProject: Project?
+    @State private var scriptImportNotice: String?
+    @State private var scriptImportError: String?
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -66,6 +71,12 @@ public struct SidebarView: View {
                                     },
                                     onAddWatchFolder: {
                                         watchFolderProject = project
+                                    },
+                                    onImportSoundReport: {
+                                        soundReportProject = project
+                                    },
+                                    onImportScript: {
+                                        presentScriptImportPanel(for: project)
                                     }
                                 )
                             }
@@ -80,6 +91,23 @@ public struct SidebarView: View {
 
             if let project = selectedProject {
                 Divider()
+                HStack {
+                    Button {
+                        soundReportProject = project
+                    } label: {
+                        Label("Import Sound Report…", systemImage: "waveform")
+                    }
+                    .buttonStyle(.bordered)
+                    Button {
+                        presentScriptImportPanel(for: project)
+                    } label: {
+                        Label("Import Script…", systemImage: "doc.text")
+                    }
+                    .buttonStyle(.bordered)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.top, 6)
                 SceneSubjectListView(project: project, clipStore: clipStore)
             }
         }
@@ -87,7 +115,55 @@ public struct SidebarView: View {
             NewProjectSheet(projectStore: projectStore)
         }
         .sheet(item: $watchFolderProject) { project in
-            WatchFolderSheet(project: project, projectStore: projectStore)
+            WatchFolderSheet(project: project, projectStore: projectStore, clipStore: clipStore)
+        }
+        .sheet(item: $soundReportProject) { project in
+            SoundReportImportSheet(project: project, clipStore: clipStore)
+        }
+        .alert("Script imported", isPresented: Binding(
+            get: { scriptImportNotice != nil },
+            set: { if !$0 { scriptImportNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let scriptImportNotice {
+                Text(scriptImportNotice)
+            }
+        }
+        .alert("Import failed", isPresented: Binding(
+            get: { scriptImportError != nil },
+            set: { if !$0 { scriptImportError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let scriptImportError {
+                Text(scriptImportError)
+            }
+        }
+    }
+
+    private func presentScriptImportPanel(for project: Project) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.title = "Import Screenplay"
+        var types: [UTType] = [.pdf]
+        if let fdx = UTType(filenameExtension: "fdx") {
+            types.append(fdx)
+        }
+        panel.allowedContentTypes = types
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                do {
+                    let result = try await clipStore.importScript(from: url, projectId: project.id)
+                    let title = result.title ?? url.deletingPathExtension().lastPathComponent
+                    scriptImportNotice = "Imported \(result.scenes.count) scenes from \(title).\(url.pathExtension.lowercased())"
+                } catch {
+                    scriptImportError = error.localizedDescription
+                }
+            }
         }
     }
 
@@ -105,6 +181,8 @@ private struct ProjectRowView: View {
     let statistics: ProjectStatistics
     let onSelect: () -> Void
     let onAddWatchFolder: () -> Void
+    let onImportSoundReport: () -> Void
+    let onImportScript: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
@@ -135,6 +213,18 @@ private struct ProjectRowView: View {
 
                 Spacer()
 
+                Button(action: onImportSoundReport) {
+                    Image(systemName: "waveform")
+                }
+                .buttonStyle(.borderless)
+                .help("Import Sound Report")
+
+                Button(action: onImportScript) {
+                    Image(systemName: "doc.text")
+                }
+                .buttonStyle(.borderless)
+                .help("Import Script")
+
                 VStack(spacing: 2) {
                     ProgressView(value: statistics.reviewProgress)
                         .frame(width: 40)
@@ -151,6 +241,8 @@ private struct ProjectRowView: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button("Add Watch Folder", action: onAddWatchFolder)
+            Button("Import Sound Report…", action: onImportSoundReport)
+            Button("Import Script…", action: onImportScript)
         }
     }
 }

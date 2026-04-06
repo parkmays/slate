@@ -125,10 +125,10 @@ private struct ProxyPendingView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: status == .processing ? "gear" : "clock")
+            Image(systemName: pendingIcon)
                 .font(.system(size: 36))
                 .foregroundColor(.secondary)
-            Text(status == .processing ? "Generating Proxy…" : "Proxy Not Ready")
+            Text(pendingTitle)
                 .font(.headline)
                 .foregroundColor(.white)
             Text(subtitleText)
@@ -143,8 +143,26 @@ private struct ProxyPendingView: View {
         switch status {
         case .pending:    return "Proxy generation is queued. It will start after ingest completes."
         case .processing: return "VideoToolbox is transcoding the proxy. This may take a few minutes."
+        case .uploading:  return "Uploading proxy to cloud storage for remote review."
         case .error:      return "Proxy generation encountered an error. Check ingest progress."
         case .ready:      return "" // Should never show this view for .ready
+        case .completed:  return "" // Same as ready when shown (should not appear for playable state)
+        }
+    }
+
+    private var pendingIcon: String {
+        switch status {
+        case .processing: return "gear"
+        case .uploading: return "arrow.up.circle"
+        default: return "clock"
+        }
+    }
+
+    private var pendingTitle: String {
+        switch status {
+        case .processing: return "Generating Proxy…"
+        case .uploading: return "Uploading Proxy…"
+        default: return "Proxy Not Ready"
         }
     }
 }
@@ -204,7 +222,7 @@ final class ProxyPlayerController: ObservableObject {
         state = .loading
 
         // Guard: proxy must be ready before we can play
-        guard clip.proxyStatus == .ready else {
+        guard [.ready, .completed].contains(clip.proxyStatus) else {
             state = .proxyPending(clip.proxyStatus)
             return
         }

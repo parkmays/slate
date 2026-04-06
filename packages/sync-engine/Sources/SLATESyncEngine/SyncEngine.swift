@@ -278,12 +278,11 @@ public struct SyncEngine: Sendable {
         let coarseMaxLag = Int(configuration.searchWindowSeconds * configuration.coarseCorrelationRate)
         
         // Use fast correlation for coarse search
-        let coarse = AudioAnalysisOptimized.fastCorrelation(reference: coarseReference, comparison: coarseComparison, maxLag: coarseMaxLag)
+        _ = AudioAnalysisOptimized.fastCorrelation(reference: coarseReference, comparison: coarseComparison, maxLag: coarseMaxLag)
 
         let fineReference = AudioAnalysisOptimized.downsample(primarySamples, from: primaryAudio.sampleRate, to: configuration.fineCorrelationRate)
         let fineComparison = AudioAnalysisOptimized.downsample(secondarySamples, from: secondaryAudio.sampleRate, to: configuration.fineCorrelationRate)
-        let coarseLagInFineSamples = Int((Double(coarse.lag) / configuration.coarseCorrelationRate) * configuration.fineCorrelationRate)
-        
+
         // Use direct correlation for fine search (smaller search space)
         let fine = AudioAnalysis.bestLag(
             reference: fineReference,
@@ -357,7 +356,7 @@ public struct SyncEngine: Sendable {
         } catch {
             print("Audio role classification failed: \(error)")
             // Fall back to simple heuristic
-            return fallbackRoleAssignment(tracks: tracks)
+            return await fallbackRoleAssignment(tracks: tracks)
         }
     }
     
@@ -406,7 +405,7 @@ public struct SyncEngine: Sendable {
         return updatedTracks
     }
     
-    private func fallbackRoleAssignment(tracks: [URL]) -> [AudioTrack] {
+    private func fallbackRoleAssignment(tracks: [URL]) async -> [AudioTrack] {
         // Original heuristic implementation as fallback
         var analyzed: [(index: Int, rms: Float, airiness: Float, track: AudioTrack)] = []
 

@@ -20,7 +20,8 @@ let package = Package(
         .target(
             name: "SLATEAIPipeline",
             dependencies: [
-                .product(name: "SLATESharedTypes", package: "shared-types")
+                .product(name: "SLATESharedTypes", package: "shared-types"),
+                .product(name: "SLATESyncEngine", package: "sync-engine")
             ],
             resources: [
                 .process("Resources")

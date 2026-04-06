@@ -225,7 +225,7 @@ public struct ConfidenceTracker {
         case .high: return 0.9
         case .medium: return 0.7
         case .low: return 0.5
-        case .manual_required: return 0.3
+        case .manualRequired: return 0.3
         case .unsynced: return 0.1
         }
     }
@@ -325,36 +325,6 @@ extension AIScores {
                 "exposure": Double(exposure),
                 "stability": Double(stability),
                 "audio": Double(audio)
-            ]
-        )
-    }
-}
-
-// MARK: - Extension for MultiCamSyncResult
-
-extension MultiCamSyncResult {
-    public func withConfidenceTracking(_ tracker: inout ConfidenceTracker,
-                                      processingTime: TimeInterval,
-                                      inputSize: ConfidenceTracker.InputSize) {
-        let modelType: ConfidenceTracker.ModelType
-        
-        switch method {
-        case .timecodeMetadata:
-            modelType = .syncTimecode
-        case .slateDetection:
-            modelType = .syncSlate
-        case .audioCorrelation:
-            modelType = .syncCorrelation
-        }
-        
-        tracker.recordSyncInference(
-            method: modelType,
-            confidence: confidence,
-            processingTime: processingTime,
-            inputSize: inputSize,
-            additionalMetrics: [
-                "offsetFrames": Double(offsetFrames),
-                "offsetSeconds": offsetSeconds
             ]
         )
     }

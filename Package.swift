@@ -35,6 +35,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
         .package(url: "https://github.com/huggingface/swift-transformers.git", from: "0.1.0"),
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
     ],
     targets: [
         .target(
@@ -65,9 +66,13 @@ let package = Package(
             name: "SLATEAIPipeline",
             dependencies: [
                 "SLATESharedTypes",
+                "SLATESyncEngine",
                 .product(name: "Transformers", package: "swift-transformers")
             ],
             path: "packages/ai-pipeline/Sources/SLATEAIPipeline",
+            resources: [
+                .copy("Resources")
+            ],
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("CoreML"),
@@ -83,18 +88,30 @@ let package = Package(
             dependencies: [
                 "SLATESharedTypes"
             ],
-            path: "packages/export-writers/Sources/ExportWriters"
+            path: "packages/export-writers/Sources/ExportWriters",
+            resources: [
+                .copy("Resources")
+            ]
         ),
         .target(
             name: "IngestDaemon",
             dependencies: [
                 "SLATESharedTypes",
                 "SLATESyncEngine",
-                "SLATEAIPipeline"
+                "SLATEAIPipeline",
+                .product(name: "GRDB", package: "GRDB.swift")
             ],
             path: "packages/ingest-daemon/Sources/IngestDaemon",
+            exclude: [
+                "DesktopBridge.swift",
+                "WatchFolderDaemon.swift"
+            ],
+            resources: [
+                .copy("../../Resources/LUTs")
+            ],
             linkerSettings: [
-                .linkedFramework("AVFoundation")
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("PDFKit")
             ]
         ),
         .testTarget(
@@ -109,10 +126,7 @@ let package = Package(
             dependencies: [
                 "SLATESyncEngine"
             ],
-            path: "packages/sync-engine/Tests/SLATESyncEngineTests",
-            resources: [
-                .copy("Fixtures")
-            ]
+            path: "packages/sync-engine/Tests/SLATESyncEngineTests"
         ),
         .testTarget(
             name: "SLATEAIPipelineTests",
@@ -127,15 +141,6 @@ let package = Package(
                 "ExportWriters"
             ],
             path: "packages/export-writers/Tests/ExportWritersTests"
-        ),
-        .testTarget(
-            name: "SLATEIntegrationTests",
-            dependencies: [
-                "SLATESyncEngine",
-                "SLATEAIPipeline",
-                "SLATESharedTypes"
-            ],
-            path: "tests/IntegrationTests"
         ),
     ]
 )

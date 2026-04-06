@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import CoreMedia
 import Foundation
 
@@ -175,5 +176,46 @@ enum AudioHelpers {
             partial + ((pair.0 >= 0 && pair.1 < 0) || (pair.0 < 0 && pair.1 >= 0) ? 1 : 0)
         }
         return Double(crossings) / Double(samples.count - 1)
+    }
+
+    static func computeFFTMagnitudes(frame: [Float]) -> [Float] {
+        guard !frame.isEmpty else { return [] }
+
+        let fftSize = 1 << Int(ceil(log2(Double(max(2, frame.count)))))
+        let halfSize = fftSize / 2
+        let log2n = vDSP_Length(log2(Double(fftSize)))
+        guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else {
+            return []
+        }
+        defer { vDSP_destroy_fftsetup(setup) }
+
+        var padded = Array(repeating: Float.zero, count: fftSize)
+        for index in frame.indices {
+            padded[index] = frame[index]
+        }
+
+        var window = Array(repeating: Float.zero, count: fftSize)
+        vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
+        var windowed = Array(repeating: Float.zero, count: fftSize)
+        vDSP_vmul(padded, 1, window, 1, &windowed, 1, vDSP_Length(fftSize))
+
+        var real = Array(repeating: Float.zero, count: halfSize)
+        var imag = Array(repeating: Float.zero, count: halfSize)
+        var magnitudes = Array(repeating: Float.zero, count: halfSize)
+
+        real.withUnsafeMutableBufferPointer { realBuffer in
+            imag.withUnsafeMutableBufferPointer { imagBuffer in
+                var splitComplex = DSPSplitComplex(realp: realBuffer.baseAddress!, imagp: imagBuffer.baseAddress!)
+                windowed.withUnsafeBufferPointer { paddedBuffer in
+                    paddedBuffer.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: halfSize) { complexBuffer in
+                        vDSP_ctoz(complexBuffer, 2, &splitComplex, 1, vDSP_Length(halfSize))
+                    }
+                }
+                vDSP_fft_zrip(setup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
+                vDSP_zvabs(&splitComplex, 1, &magnitudes, 1, vDSP_Length(halfSize))
+            }
+        }
+
+        return magnitudes
     }
 }

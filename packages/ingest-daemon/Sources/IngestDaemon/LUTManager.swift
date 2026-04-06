@@ -1,6 +1,7 @@
-import Foundation
 import AVFoundation
 import CoreImage
+import CoreMedia
+import Foundation
 import Metal
 import MetalKit
 import SLATESharedTypes
@@ -62,14 +63,14 @@ public struct LUTManager {
 
         guard let outputPixelBuffer = createPixelBuffer(from: imageBuffer) else { return nil }
 
-        let rec709 = CGColorSpace(name: CGColorSpace.itur_709)
-        context.render(transformed,
-                       to: outputPixelBuffer,
-                       commandBuffer: nil,
-                       bounds: CGRect(x: 0, y: 0,
-                                      width: CVPixelBufferGetWidth(imageBuffer),
-                                      height: CVPixelBufferGetHeight(imageBuffer)),
-                       colorSpace: rec709)
+        guard let rec709 = CGColorSpace(name: CGColorSpace.itur_709) else { return nil }
+        let bounds = CGRect(
+            x: 0,
+            y: 0,
+            width: CVPixelBufferGetWidth(imageBuffer),
+            height: CVPixelBufferGetHeight(imageBuffer)
+        )
+        context.render(transformed, to: outputPixelBuffer, bounds: bounds, colorSpace: rec709)
 
         return rebuildSampleBuffer(from: outputPixelBuffer, timing: sampleBuffer)
     }
@@ -84,22 +85,7 @@ public struct LUTManager {
 
     /// Loads a 3D .cube LUT from the app bundle and wraps it in a CIColorCubeWithColorSpace filter.
     private static func buildCubeFilter(lut: ProxyLUT, input: CIImage) -> CIImage? {
-        let resourceName: String
-        switch lut {
-        case .arriLogC3Rec709:  resourceName = "arri_logc3_to_rec709"
-        case .bmFilmGen5Rec709: resourceName = "bm_film_gen5_to_rec709"
-        case .redIPP2Rec709:    resourceName = "red_ipp2_to_rec709"
-        case .none:             return nil
-        }
-
-        // Search bundle resources; ingest daemon is a standalone process so we
-        // look in its bundle first, then the main app bundle as a fallback.
-        let searchBundles: [Bundle] = [Bundle.main, Bundle(for: LUTManagerClass.self)]
-        guard let cubeURL = searchBundles.lazy.compactMap({
-            $0.url(forResource: resourceName, withExtension: "cube")
-        }).first else {
-            return nil   // .cube file not shipped yet — fall back to parametric
-        }
+        guard let cubeURL = bundledLUTURL(for: lut) else { return nil }
 
         guard let cubeData = try? Data(contentsOf: cubeURL),
               let (lutData, dimension) = parseCUBEData(cubeData) else {
@@ -114,6 +100,38 @@ public struct LUTManager {
         ])
     }
 
+    // Internal test seam: validate packaged LUT discovery without invoking CI filters.
+    static func bundledLUTURL(for lut: ProxyLUT) -> URL? {
+        let resourceName: String
+        switch lut {
+        case .arriLogC3Rec709:  resourceName = "arri_logc3_rec709"
+        case .bmFilmGen5Rec709: resourceName = "bm_film_gen5_rec709"
+        case .redIPP2Rec709:    resourceName = "red_ipp2_rec709"
+        case .none:             return nil
+        }
+
+        // Search known, deterministic bundles first.
+        let searchBundles: [Bundle] = [Bundle(for: LUTManagerClass.self), Bundle.main]
+        if let bundled = searchBundles.lazy.compactMap({
+            $0.url(forResource: resourceName, withExtension: "cube")
+                ?? $0.url(forResource: resourceName, withExtension: "cube", subdirectory: "LUTs")
+                ?? $0.url(forResource: resourceName, withExtension: "cube", subdirectory: "Resources/LUTs")
+        }).first {
+            return bundled
+        }
+
+        // SwiftPM package tests may not embed the LUT folder as a bundle resource
+        // when the resources live outside the target directory; allow a source-tree
+        // fallback so local/dev test runs can still validate LUT parsing.
+        let sourceTreeCandidates = [
+            URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .appendingPathComponent("../../Resources/LUTs/\(resourceName).cube")
+                .standardizedFileURL
+        ]
+        return sourceTreeCandidates.first(where: { FileManager.default.fileExists(atPath: $0.path) })
+    }
+
     /// Parametric Rec.709 approximation used when the .cube file is absent.
     /// Good enough for monitoring; replaced by the real LUT once files ship.
     private static func parametricRec709Approximation(for lut: ProxyLUT, input: CIImage) -> CIImage {
@@ -126,7 +144,7 @@ public struct LUTManager {
         case .none:             gamma = 1.0
         }
         return input.applyingFilter("CIGammaAdjust", parameters: [
-            kCIInputPowerKey: gamma
+            "inputPower": gamma
         ])
     }
 
@@ -152,9 +170,18 @@ public struct LUTManager {
             }
         }
 
-        guard !floats.isEmpty else { return nil }
+        let expectedCount = dimension * dimension * dimension * 4
+        guard !floats.isEmpty, floats.count == expectedCount else { return nil }
         let rawData = floats.withUnsafeBufferPointer { Data(buffer: $0) }
         return (rawData, dimension)
+    }
+
+    /// Wraps a CVPixelBuffer back into a CMSampleBuffer, copying timing from `source`.
+    public static func sampleBuffer(
+        wrapping pixelBuffer: CVPixelBuffer,
+        timingFrom source: CMSampleBuffer
+    ) -> CMSampleBuffer? {
+        rebuildSampleBuffer(from: pixelBuffer, timing: source)
     }
 
     /// Wraps a CVPixelBuffer back into a CMSampleBuffer, copying timing from `source`.
@@ -172,16 +199,14 @@ public struct LUTManager {
                                                      formatDescriptionOut: &formatDesc)
         guard let desc = formatDesc else { return nil }
         var newBuffer: CMSampleBuffer?
-        CMSampleBufferCreateWithImageBuffer(
+        let status = CMSampleBufferCreateReadyWithImageBuffer(
             allocator: kCFAllocatorDefault,
             imageBuffer: pixelBuffer,
-            dataReady: true,
-            makeDataReadyCallback: nil,
-            refcon: nil,
             formatDescription: desc,
             sampleTiming: &timingInfo,
             sampleBufferOut: &newBuffer
         )
+        guard status == noErr else { return nil }
         return newBuffer
     }
     
@@ -190,7 +215,7 @@ public struct LUTManager {
         let height = CVPixelBufferGetHeight(original)
         let pixelFormatType = CVPixelBufferGetPixelFormatType(original)
         
-        var attributes: [String: Any] = [
+        let attributes: [String: Any] = [
             kCVPixelBufferCGImageCompatibilityKey as String: true,
             kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
             kCVPixelBufferWidthKey as String: width,

@@ -42,11 +42,16 @@ let package = Package(
             path: "Sources/IngestDaemon",
             exclude: [
                 "DesktopBridge.swift",
-                "ProxyGenerator.swift",
                 "WatchFolderDaemon.swift"
+            ],
+            resources: [
+                .copy("../../Resources/LUTs")
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")
+            ],
+            linkerSettings: [
+                .linkedFramework("PDFKit")
             ]
         ),
         .executableTarget(

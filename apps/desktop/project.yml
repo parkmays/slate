@@ -25,6 +25,8 @@ settings:
     MARKETING_VERSION: 0.1.0
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     SWIFT_VERSION: 5.0
+    # No App Intents / Shortcuts; skip metadata extraction (avoids appintentsmetadataprocessor noise).
+    ENABLE_APP_INTENTS_METADATA_GENERATION: "NO"
 targets:
   SLATECore:
     type: framework
@@ -45,7 +47,12 @@ targets:
     settings:
       base:
         DEFINES_MODULE: YES
+        ENABLE_APP_INTENTS_METADATA_GENERATION: "NO"
         GENERATE_INFOPLIST_FILE: YES
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-weak_framework"
+          - AppIntents
         PRODUCT_BUNDLE_IDENTIFIER: com.mountaintop.slate.core
         PRODUCT_NAME: SLATECore
         OTHER_SWIFT_FLAGS:
@@ -68,7 +75,12 @@ targets:
     settings:
       base:
         DEFINES_MODULE: YES
+        ENABLE_APP_INTENTS_METADATA_GENERATION: "NO"
         GENERATE_INFOPLIST_FILE: YES
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-weak_framework"
+          - AppIntents
         PRODUCT_BUNDLE_IDENTIFIER: com.mountaintop.slate.ui
         PRODUCT_NAME: SLATEUI
         OTHER_SWIFT_FLAGS:
@@ -89,10 +101,15 @@ targets:
         product: SLATESharedTypes
     settings:
       base:
+        ENABLE_APP_INTENTS_METADATA_GENERATION: "NO"
         GENERATE_INFOPLIST_FILE: YES
         LD_RUNPATH_SEARCH_PATHS:
           - "$(inherited)"
           - "@executable_path/../Frameworks"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-weak_framework"
+          - AppIntents
         PRODUCT_BUNDLE_IDENTIFIER: com.mountaintop.slate
         PRODUCT_NAME: SLATE
 

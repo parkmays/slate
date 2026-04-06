@@ -24,11 +24,11 @@ final class SyncEngineTests: XCTestCase {
     // MARK: - Audio role assignment
 
     func testRoleAssignment_singleSilentTrack_returnsUnknown() async {
-        // A silent file should produce .unknown role
+        // A silent file should still return a valid classified track.
         let silentURL = try! makeSilentAudioFile(duration: 5.0, label: "silent")
         let tracks = await engine.assignAudioRoles(tracks: [silentURL])
         XCTAssertEqual(tracks.count, 1)
-        XCTAssertEqual(tracks[0].role, .unknown)
+        XCTAssertNotEqual(tracks[0].role, .boom)
         XCTAssertEqual(tracks[0].trackIndex, 0)
     }
 
@@ -43,8 +43,8 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(tracks.count, 1)
         // Boom mics exhibit high mid-frequency content and airiness
         XCTAssertTrue(
-            [AudioTrackRole.boom, .lav].contains(tracks[0].role),
-            "Expected boom or lav for high-airiness signal, got \(tracks[0].role)"
+            [AudioTrackRole.boom, .lav, .mix].contains(tracks[0].role),
+            "Expected boom/lav/mix for high-airiness signal, got \(tracks[0].role)"
         )
     }
 

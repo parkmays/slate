@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import CoreImage
 import CoreML
 import Foundation
 import SLATESharedTypes
@@ -23,7 +24,7 @@ public struct VisionScoreResult: Sendable {
     }
 }
 
-public struct VisionScorer: Sendable {
+public struct VisionScorer {
     private let sampleFPS: Double
     private let useCoreML: Bool
     private let coreMLManager: CoreMLModelManager
@@ -85,7 +86,7 @@ public struct VisionScorer: Sendable {
         
         let duration = try await asset.load(.duration).seconds
         let step = max(1.0 / max(sampleFPS, 1), 0.25)
-        let times = stride(from: 0, to: duration, by: step).map { CMTime(seconds: $0) }
+        let times = stride(from: 0, to: duration, by: step).map { CMTime(seconds: $0, preferredTimescale: 600) }
         
         var focusMeasures: [Float] = []
         var exposureHistograms: [[Float]] = []
@@ -150,14 +151,17 @@ public struct VisionScorer: Sendable {
                      format: .L8,
                      colorSpace: nil)
         
-        // Calculate variance
-        let mean = bitmap.reduce(0, +) / Float(bitmap.count)
-        let variance = bitmap.reduce(0) { sum, value in
+        // Calculate variance (explicit integer math avoids CoreML MLTensor operator overloads on `+` / `reduce`)
+        let n = bitmap.count
+        guard n > 0 else { return 0 }
+        let sum = bitmap.reduce(0) { $0 + Int($1) }
+        let mean = Float(sum) / Float(n)
+        var varianceAccum: Float = 0
+        for value in bitmap {
             let diff = Float(value) - mean
-            return sum + diff * diff
-        } / Float(bitmap.count)
-        
-        return variance
+            varianceAccum += diff * diff
+        }
+        return varianceAccum / Float(n)
     }
     
     private func extractExposureHistogram(from image: CIImage) -> [Float] {
@@ -174,9 +178,9 @@ public struct VisionScorer: Sendable {
         
         // Create luminance histogram
         var histogram = [Float](repeating: 0, count: 256)
-        let stride = 4
+        let pixelStride = 4
         
-        for i in stride(from: 0, to: bitmap.count, by: stride) {
+        for i in Swift.stride(from: 0, to: bitmap.count, by: pixelStride) {
             let r = Float(bitmap[i])
             let g = Float(bitmap[i + 1])
             let b = Float(bitmap[i + 2])
@@ -186,7 +190,7 @@ public struct VisionScorer: Sendable {
         }
         
         // Normalize
-        let total = Float(bitmap.count / stride)
+        let total = Float(bitmap.count / pixelStride)
         return histogram.map { $0 / total }
     }
     
@@ -194,8 +198,8 @@ public struct VisionScorer: Sendable {
         // Simple phase correlation for motion estimation
         // In a real implementation, you'd use a more sophisticated optical flow algorithm
         
-        let prevCI = CIImage(cgImage: previous)
-        let currCI = CIImage(cgImage: current)
+        _ = CIImage(cgImage: previous)
+        _ = CIImage(cgImage: current)
         
         // For now, return a placeholder
         return (dx: 0, dy: 0)
@@ -216,7 +220,7 @@ public struct VisionScorer: Sendable {
         var bitmap = [Float](repeating: 0, count: Int(extent.width * extent.height))
         context.render(output,
                      toBitmap: &bitmap,
-                     rowBytes: Int(extent.width * MemoryLayout<Float>.size),
+                     rowBytes: Int(extent.width) * MemoryLayout<Float>.size,
                      bounds: CGRect(origin: .zero, size: extent.size),
                      format: .Rf,
                      colorSpace: nil)

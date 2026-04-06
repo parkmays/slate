@@ -29,7 +29,7 @@ public struct SLATELogger {
         }
     }
     
-    public enum LogLevel: String, Codable, CaseIterable {
+    public enum LogLevel: String, Codable, CaseIterable, Sendable {
         case debug = "DEBUG"
         case info = "INFO"
         case warning = "WARNING"
@@ -105,10 +105,11 @@ public struct SLATELogger {
             os_log("%{public}@", log: osLog, type: level.osLogType, simpleMessage)
         }
         
-        // Log to file if configured
+        // Log to file if configured (static helper avoids capturing `self` in a `Task` for Swift 6 sending rules)
         if !configuration.filePath.isEmpty {
+            let logging = configuration
             Task {
-                await writeToFile(entry)
+                await Self.writeToFile(entry, logging: logging)
             }
         }
         
@@ -121,12 +122,22 @@ public struct SLATELogger {
     }
     
     private func shouldLog(_ level: LogLevel) -> Bool {
+        let configLevel = Self.mapConfigLevel(configuration.level)
         let levels: [LogLevel] = [.debug, .info, .warning, .error]
-        guard let configIndex = levels.firstIndex(of: configuration.level),
+        guard let configIndex = levels.firstIndex(of: configLevel),
               let messageIndex = levels.firstIndex(of: level) else {
             return true
         }
         return messageIndex >= configIndex
+    }
+    
+    private static func mapConfigLevel(_ level: SLATEConfiguration.LogLevel) -> LogLevel {
+        switch level {
+        case .debug: return .debug
+        case .info: return .info
+        case .warning: return .warning
+        case .error: return .error
+        }
     }
     
     private func formatStructuredMessage(_ entry: LogEntry) -> String {
@@ -163,19 +174,19 @@ public struct SLATELogger {
         return "\(entry.level.emoji) [\(entry.category)] \(entry.message)"
     }
     
-    private func writeToFile(_ entry: LogEntry) async {
+    private static func writeToFile(_ entry: LogEntry, logging: SLATEConfiguration.Logging) async {
         // Implementation would write to rotating log files
         // This is a simplified version
         guard let data = try? JSONEncoder().encode(entry),
               let string = String(data: data, encoding: .utf8) else { return }
         
-        let fileURL = URL(fileURLWithPath: configuration.filePath)
+        let fileURL = URL(fileURLWithPath: logging.filePath)
         
         // Check file size and rotate if necessary
         if let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
            let fileSize = attributes[.size] as? Int,
-           fileSize > configuration.maxFileSize {
-            await rotateLogFile()
+           fileSize > logging.maxFileSize {
+            await rotateLogFile(logging: logging)
         }
         
         // Append to file
@@ -191,12 +202,12 @@ public struct SLATELogger {
         }
     }
     
-    private func rotateLogFile() async {
-        let fileURL = URL(fileURLWithPath: configuration.filePath)
+    private static func rotateLogFile(logging: SLATEConfiguration.Logging) async {
+        let fileURL = URL(fileURLWithPath: logging.filePath)
         let fileManager = FileManager.default
         
         // Remove oldest file if we have too many
-        for i in (1..<configuration.maxFiles).reversed() {
+        for i in (1..<logging.maxFiles).reversed() {
             let oldURL = fileURL.appendingPathExtension("\(i).old")
             if fileManager.fileExists(atPath: oldURL.path) {
                 try? fileManager.removeItem(at: oldURL)
@@ -204,7 +215,7 @@ public struct SLATELogger {
         }
         
         // Rotate existing files
-        for i in (1..<configuration.maxFiles).reversed() {
+        for i in (1..<logging.maxFiles).reversed() {
             let currentURL = fileURL.appendingPathExtension("\(i-1).old")
             let newURL = fileURL.appendingPathExtension("\(i).old")
             if fileManager.fileExists(atPath: currentURL.path) {
@@ -468,7 +479,7 @@ public struct MetricsReport: Codable, Sendable {
 
 // MARK: - Codable Wrappers
 
-public struct AnyCodable: Codable {
+public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
     
     public init(_ value: Any) {

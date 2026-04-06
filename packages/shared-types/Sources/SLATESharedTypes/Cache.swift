@@ -1,7 +1,9 @@
+import CryptoKit
 import Foundation
 
 /// Thread-safe caching system for SLATE components
-public actor Cache<Key: Hashable, Value: Codable> {
+public final class Cache<Key: Hashable, Value: Codable> {
+    private let lock = NSLock()
     
     public struct CacheEntry: Codable {
         public let value: Value
@@ -56,6 +58,8 @@ public actor Cache<Key: Hashable, Value: Codable> {
     // MARK: - Cache Operations
     
     public func get(_ key: Key) -> Value? {
+        lock.lock()
+        defer { lock.unlock() }
         // Cleanup expired entries periodically
         if Date().timeIntervalSince(lastCleanup) > cleanupInterval {
             cleanupExpired()
@@ -77,6 +81,8 @@ public actor Cache<Key: Hashable, Value: Codable> {
     }
     
     public func set(_ key: Key, value: Value, ttl: TimeInterval? = nil) {
+        lock.lock()
+        defer { lock.unlock() }
         let entry = CacheEntry(value: value, ttl: ttl ?? defaultTTL)
         
         // If cache is full, remove least recently used items
@@ -88,28 +94,40 @@ public actor Cache<Key: Hashable, Value: Codable> {
     }
     
     public func remove(_ key: Key) {
+        lock.lock()
+        defer { lock.unlock() }
         storage.removeValue(forKey: key)
     }
     
     public func removeAll() {
+        lock.lock()
+        defer { lock.unlock() }
         storage.removeAll()
     }
     
     // MARK: - Cache Statistics
     
     public var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
         return storage.count
     }
     
     public var keys: [Key] {
+        lock.lock()
+        defer { lock.unlock() }
         return Array(storage.keys)
     }
     
     public func getEntryInfo(_ key: Key) -> CacheEntry? {
+        lock.lock()
+        defer { lock.unlock() }
         return storage[key]
     }
     
     public func getStatistics() -> CacheStatistics {
+        lock.lock()
+        defer { lock.unlock() }
         let entries = Array(storage.values)
         let expiredCount = entries.filter { $0.isExpired }.count
         let totalAccesses = entries.reduce(0) { $0 + $1.accessCount }
@@ -147,7 +165,7 @@ public actor Cache<Key: Hashable, Value: Codable> {
     }
 }
 
-public struct CacheStatistics: Codable {
+public struct CacheStatistics: Codable, Sendable {
     public let totalEntries: Int
     public let expiredEntries: Int
     public let maxEntries: Int
@@ -208,10 +226,18 @@ public actor SyncResultCache {
         return components.joined(separator: "|")
     }
     
+    public func removeAll() {
+        cache.removeAll()
+    }
+    
+    public func statisticsSnapshot() -> CacheStatistics {
+        cache.getStatistics()
+    }
+    
     private func checksumOfFile(at url: URL) throws -> String {
         let data = try Data(contentsOf: url)
-        let digest = SHA256.hash(data: data)
-        return digest.compactMap { String(format: "%02x", $0) }.joined()
+        let digest = Array(SHA256.hash(data: data))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -252,6 +278,14 @@ public actor AIScoreCache {
         
         return components.joined(separator: "|")
     }
+    
+    public func removeAll() {
+        cache.removeAll()
+    }
+    
+    public func statisticsSnapshot() -> CacheStatistics {
+        cache.getStatistics()
+    }
 }
 
 /// Cache for model inference results
@@ -287,8 +321,16 @@ public actor ModelInferenceCache {
     
     public func hashInput<T: Codable>(_ input: T) throws -> String {
         let data = try JSONEncoder().encode(input)
-        let digest = SHA256.hash(data: data)
-        return digest.compactMap { String(format: "%02x", $0) }.joined()
+        let digest = Array(SHA256.hash(data: data))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+    
+    public func removeAll() {
+        cache.removeAll()
+    }
+    
+    public func statisticsSnapshot() -> CacheStatistics {
+        cache.getStatistics()
     }
 }
 
@@ -320,19 +362,9 @@ public struct CachedSyncResult: Codable {
         self.processingTime = processingTime
         self.cachedAt = cachedAt
     }
-    
-    public init(from result: MultiCamSyncResult, processingTime: TimeInterval) {
-        self.offsetFrames = result.offsetFrames
-        self.offsetSeconds = result.offsetSeconds
-        self.confidence = result.confidence
-        self.method = result.method
-        self.driftPPM = result.driftPPM
-        self.processingTime = processingTime
-        self.cachedAt = Date()
-    }
 }
 
-public struct CachedAIScores: Codable {
+public struct CachedAIScores: Codable, Sendable {
     public let scores: AIScores
     public let modelVersions: [String: String]
     public let confidences: [String: Double]
@@ -378,6 +410,16 @@ public struct CachedInferenceResult: Codable {
 
 // MARK: - Cache Manager
 
+private protocol GenericCacheClearing: AnyObject {
+    func removeAllEntries()
+}
+
+extension Cache: GenericCacheClearing {
+    func removeAllEntries() {
+        removeAll()
+    }
+}
+
 /// Global cache manager
 public actor CacheManager {
     
@@ -386,7 +428,7 @@ public actor CacheManager {
     private var syncCache: SyncResultCache?
     private var aiScoreCache: AIScoreCache?
     private var modelCache: ModelInferenceCache?
-    private var genericCaches: [String: Any] = [:]
+    private var genericCaches: [String: any GenericCacheClearing] = [:]
     
     private init() {}
     
@@ -423,40 +465,26 @@ public actor CacheManager {
     }
     
     public func clearAllCaches() async {
-        await syncCache?.cache.removeAll()
-        await aiScoreCache?.cache.removeAll()
-        await modelCache?.cache.removeAll()
+        await syncCache?.removeAll()
+        await aiScoreCache?.removeAll()
+        await modelCache?.removeAll()
         
         for (_, cache) in genericCaches {
-            if let typedCache = cache as? any CacheProtocol {
-                await typedCache.removeAll()
-            }
+            cache.removeAllEntries()
         }
     }
     
     public func getStatistics() async -> CacheStatisticsReport {
         return CacheStatisticsReport(
-            syncCache: await syncCache?.cache.getStatistics(),
-            aiScoreCache: await aiScoreCache?.cache.getStatistics(),
-            modelCache: await modelCache?.cache.getStatistics(),
+            syncCache: await syncCache?.statisticsSnapshot(),
+            aiScoreCache: await aiScoreCache?.statisticsSnapshot(),
+            modelCache: await modelCache?.statisticsSnapshot(),
             genericCacheCount: genericCaches.count
         )
     }
 }
 
-// MARK: - Protocols
-
-protocol CacheProtocol {
-    func removeAll() async
-}
-
-extension Cache: CacheProtocol {
-    func removeAll() async {
-        self.removeAll()
-    }
-}
-
-public struct CacheStatisticsReport: Codable {
+public struct CacheStatisticsReport: Codable, Sendable {
     public let syncCache: CacheStatistics?
     public let aiScoreCache: CacheStatistics?
     public let modelCache: CacheStatistics?
@@ -490,15 +518,5 @@ public struct CacheStatisticsReport: Codable {
         summary += "Generic Caches: \(genericCacheCount)\n"
         
         return summary
-    }
-}
-
-// MARK: - SHA256 Helper
-
-import CryptoKit
-
-extension SHA256 {
-    public static func hash(data: Data) -> [UInt8] {
-        return Array(SHA256.hash(data: data))
     }
 }

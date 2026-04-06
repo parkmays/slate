@@ -25,6 +25,8 @@ public enum ProxyStatus: String, Codable, Sendable, CaseIterable {
     case pending
     case processing
     case ready
+    case uploading
+    case completed
     case error
 }
 
@@ -281,6 +283,8 @@ public struct Annotation: Codable, Sendable, Equatable, Identifiable {
     /// UUID
     public var userId: String
     public var userDisplayName: String
+    /// Optional provenance, e.g. `"SoundReport"` for mixer log imports
+    public var source: String?
     /// HH:MM:SS:FF
     public var timecodeIn: String
     /// HH:MM:SS:FF — nil if point annotation
@@ -302,12 +306,14 @@ public struct Annotation: Codable, Sendable, Equatable, Identifiable {
         body: String,
         type: AnnotationType = .text,
         voiceUrl: String? = nil,
+        source: String? = nil,
         createdAt: String = ISO8601DateFormatter().string(from: Date()),
         resolvedAt: String? = nil
     ) {
         self.id = id
         self.userId = userId
         self.userDisplayName = userDisplayName
+        self.source = source
         self.timecodeIn = timecodeIn
         self.timecodeOut = timecodeOut
         self.body = body
@@ -345,6 +351,8 @@ public struct Clip: Codable, Sendable, Identifiable {
     public var proxyStatus: ProxyStatus
     /// SHA-256 hex of the proxy file
     public var proxyChecksum: String?
+    /// Public R2 (or CDN) URL for the proxy when uploaded — used for digests and cloud review.
+    public var proxyR2URL: String?
     /// LUT applied during proxy generation (nil = no LUT / pass-through).
     /// Values: "arri_logc3_rec709" | "bm_film_gen5_rec709" | "red_ipp2_rec709" | "none"
     public var proxyLUT: String?
@@ -400,6 +408,7 @@ public struct Clip: Codable, Sendable, Identifiable {
         proxyPath: String? = nil,
         proxyStatus: ProxyStatus = .pending,
         proxyChecksum: String? = nil,
+        proxyR2URL: String? = nil,
         proxyLUT: String? = nil,
         proxyColorSpace: String? = nil,
         narrativeMeta: NarrativeMeta? = nil,
@@ -434,6 +443,7 @@ public struct Clip: Codable, Sendable, Identifiable {
         self.proxyPath = proxyPath
         self.proxyStatus = proxyStatus
         self.proxyChecksum = proxyChecksum
+        self.proxyR2URL = proxyR2URL
         self.proxyLUT = proxyLUT
         self.proxyColorSpace = proxyColorSpace
         self.narrativeMeta = narrativeMeta
@@ -494,7 +504,9 @@ public struct CameraMetadata: Codable, Sendable {
     public var colorSpace: String?
     public var duration: Double?        // seconds
     public var bitrate: Int64?          // bits per second
-    
+    /// Raw slate / clapperboard OCR text from `SlateOCRDetector` (optional).
+    public var slateOCRRawText: String?
+
     public init() {}
 }
 
@@ -513,6 +525,12 @@ public struct Project: Codable, Sendable, Identifiable {
     public var notificationTargets: [DeliveryTarget]
     /// Auto-deliver when assembly is ready
     public var autoDeliverOnAssembly: Bool
+    /// Recipients for the daily end-of-day digest (separate from assembly notifications).
+    public var digestTargets: [DeliveryTarget]
+    /// Local hour (0–23) to send the daily digest.
+    public var digestHour: Int
+    /// When true, schedules a daily digest while SLATE is running.
+    public var dailyDigestEnabled: Bool
 
     public init(
         id: String = UUID().uuidString,
@@ -521,7 +539,10 @@ public struct Project: Codable, Sendable, Identifiable {
         createdAt: String = ISO8601DateFormatter().string(from: Date()),
         updatedAt: String = ISO8601DateFormatter().string(from: Date()),
         notificationTargets: [DeliveryTarget] = [],
-        autoDeliverOnAssembly: Bool = true
+        autoDeliverOnAssembly: Bool = true,
+        digestTargets: [DeliveryTarget] = [],
+        digestHour: Int = 21,
+        dailyDigestEnabled: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -530,6 +551,9 @@ public struct Project: Codable, Sendable, Identifiable {
         self.updatedAt = updatedAt
         self.notificationTargets = notificationTargets
         self.autoDeliverOnAssembly = autoDeliverOnAssembly
+        self.digestTargets = digestTargets
+        self.digestHour = digestHour
+        self.dailyDigestEnabled = dailyDigestEnabled
     }
 }
 
@@ -651,10 +675,13 @@ public struct WatchFolder: Codable, Sendable, Equatable {
     public var path: String
     public var projectId: String
     public var mode: ProjectMode
+    /// Optional burn-in defaults for proxies ingested through this folder.
+    public var burnInConfig: BurnInConfig?
 
-    public init(path: String, projectId: String, mode: ProjectMode) {
+    public init(path: String, projectId: String, mode: ProjectMode, burnInConfig: BurnInConfig? = nil) {
         self.path = path
         self.projectId = projectId
         self.mode = mode
+        self.burnInConfig = burnInConfig
     }
 }

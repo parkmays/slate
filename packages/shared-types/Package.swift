@@ -22,8 +22,15 @@ let package = Package(
             name: "SLATESharedTypes",
             dependencies: [],
             path: "Sources/SLATESharedTypes",
+            resources: [
+                .copy("Resources")
+            ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")
+            ],
+            linkerSettings: [
+                .linkedFramework("Accelerate"),
+                .linkedFramework("CoreML")
             ]
         ),
         .testTarget(

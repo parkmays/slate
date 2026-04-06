@@ -17,6 +17,7 @@ SIGN_IDENTITY="${SLATE_DESKTOP_CODESIGN_IDENTITY:--}"
 SKIP_SIGN="${SLATE_DESKTOP_SKIP_SIGN:-0}"
 UPDATE_FEED_URL="${SLATE_DESKTOP_UPDATE_FEED_URL:-}"
 SUPPORT_URL="${SLATE_DESKTOP_SUPPORT_URL:-}"
+CLEAN_BUILD="${SLATE_DESKTOP_CLEAN_BUILD:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +57,11 @@ while [[ $# -gt 0 ]]; do
       SKIP_SIGN="1"
       shift
       ;;
+    --clean)
+      # Removes apps/desktop/.build — required after moving the repo (fixes SwiftShims PCM path errors).
+      CLEAN_BUILD="1"
+      shift
+      ;;
     *)
       echo "Unknown option: $1" >&2
       exit 1
@@ -69,6 +75,11 @@ if [[ ! -d "$DESKTOP_DIR" ]]; then
 fi
 
 mkdir -p "$OUTPUT_DIR"
+
+if [[ "$CLEAN_BUILD" == "1" ]]; then
+  echo "Clean build: removing $DESKTOP_DIR/.build"
+  rm -rf "$DESKTOP_DIR/.build"
+fi
 
 echo "Building $EXECUTABLE_NAME ($CONFIGURATION)..."
 (cd "$DESKTOP_DIR" && swift build -c "$CONFIGURATION" --product "$EXECUTABLE_NAME")

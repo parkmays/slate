@@ -13,6 +13,10 @@ public struct ClipGridView: View {
     @Binding var selectedClip: Clip?
     let isImportingMedia: Bool
     let importDroppedURLs: ([URL]) -> Void
+    /// Single selection — should clear multi-cam preview when switching clips.
+    let onSelectClip: (Clip) -> Void
+    /// Opens multi-camera preview for the shared `cameraGroupId` (grid double-click).
+    var onOpenMultiCamGroup: ((String) -> Void)?
 
     @State private var viewMode: ViewMode = .grid
     @State private var sortBy: SortOption = .dateCreated
@@ -46,7 +50,7 @@ public struct ClipGridView: View {
                 totalClipCount: clipStore.clips.count,
                 visibleClipCount: sortedClips.count,
                 reviewedClipCount: filteredClips.filter { $0.reviewStatus != .unreviewed }.count,
-                proxyReadyCount: filteredClips.filter { $0.proxyStatus == .ready }.count,
+                proxyReadyCount: filteredClips.filter { [.ready, .completed].contains($0.proxyStatus) }.count,
                 attentionCount: filteredClips.filter(Self.requiresAttention).count,
                 activeSearchText: searchText,
                 activeStatus: filterStatus,
@@ -69,15 +73,26 @@ public struct ClipGridView: View {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(sortedClips) { clip in
-                                ClipGridItemView(clip: clip, isSelected: selectedClip?.id == clip.id) {
-                                    selectedClip = clip
-                                }
+                                let multiCam = clip.cameraGroupId.map { clipStore.hasMultipleAngles(forGroupId: $0) } ?? false
+                                ClipGridItemView(
+                                    clip: clip,
+                                    isSelected: selectedClip?.id == clip.id,
+                                    hasMultiCam: multiCam,
+                                    onSelect: { onSelectClip(clip) },
+                                    onOpenMultiCam: { gid in onOpenMultiCamGroup?(gid) }
+                                )
                             }
                         }
                         .padding()
                     }
                 } else {
-                    ClipListView(clips: sortedClips, selectedClip: $selectedClip)
+                    ClipListView(
+                        clips: sortedClips,
+                        selectedClip: $selectedClip,
+                        clipStore: clipStore,
+                        onSelectClip: onSelectClip,
+                        onOpenMultiCamGroup: onOpenMultiCamGroup
+                    )
                 }
             }
         }
@@ -232,11 +247,13 @@ public struct ClipGridView: View {
 private struct ClipGridItemView: View {
     let clip: Clip
     let isSelected: Bool
+    let hasMultiCam: Bool
     let onSelect: () -> Void
+    let onOpenMultiCam: (String) -> Void
 
     var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topTrailing) {
                 ThumbnailView(clip: clip)
                     .aspectRatio(16 / 9, contentMode: .fit)
                     .cornerRadius(8)
@@ -245,46 +262,65 @@ private struct ClipGridItemView: View {
                             .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 3)
                     )
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(URL(fileURLWithPath: clip.sourcePath).lastPathComponent)
-                        .font(.caption)
-                        .fontWeight(.medium)
+                if hasMultiCam {
+                    Text("Multi-Cam")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.purple.opacity(0.88))
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
+                        .padding(6)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(URL(fileURLWithPath: clip.sourcePath).lastPathComponent)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+
+                if let contextLabel = clipContextLabel {
+                    Text(contextLabel)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                         .lineLimit(1)
+                }
 
-                    if let contextLabel = clipContextLabel {
-                        Text(contextLabel)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
+                HStack {
+                    Text(formatDuration(clip.duration))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(clip.sourceFps, specifier: "%.2f") fps")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
+                HStack(spacing: 4) {
+                    ReviewStatusBadge(status: clip.reviewStatus)
+                    ProxyStatusBadge(status: clip.proxyStatus)
+                    if clip.syncResult.confidence != .unsynced {
+                        SyncStatusBadge(confidence: clip.syncResult.confidence)
                     }
-
-                    HStack {
-                        Text(formatDuration(clip.duration))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(clip.sourceFps, specifier: "%.2f") fps")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-
-                    HStack(spacing: 4) {
-                        ReviewStatusBadge(status: clip.reviewStatus)
-                        ProxyStatusBadge(status: clip.proxyStatus)
-                        if clip.syncResult.confidence != .unsynced {
-                            SyncStatusBadge(confidence: clip.syncResult.confidence)
-                        }
-                        if let composite = clip.aiScores?.composite {
-                            AIScoreBadge(score: composite)
-                        }
+                    if let composite = clip.aiScores?.composite {
+                        AIScoreBadge(score: composite)
                     }
                 }
             }
-            .padding(8)
-            .background(Color(NSColor.controlBackgroundColor))
-            .cornerRadius(12)
         }
-        .buttonStyle(.plain)
+        .padding(8)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(12)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            if hasMultiCam, let gid = clip.cameraGroupId {
+                onOpenMultiCam(gid)
+            }
+        }
+        .onTapGesture(count: 1) {
+            onSelect()
+        }
     }
 
     private func formatDuration(_ seconds: Double) -> String {
@@ -466,6 +502,8 @@ extension ProxyStatus {
         case .pending: return "clock"
         case .processing: return "arrow.triangle.2.circlepath"
         case .ready: return "checkmark.circle"
+        case .uploading: return "arrow.up.circle"
+        case .completed: return "checkmark.circle.fill"
         case .error: return "xmark.circle"
         }
     }
@@ -475,6 +513,8 @@ extension ProxyStatus {
         case .pending: return .gray
         case .processing: return .blue
         case .ready: return .green
+        case .uploading: return .orange
+        case .completed: return .green
         case .error: return .red
         }
     }
@@ -677,14 +717,22 @@ private struct ActiveFilterChip: View {
 private struct ClipListView: View {
     let clips: [Clip]
     @Binding var selectedClip: Clip?
+    @ObservedObject var clipStore: GRDBClipStore
+    let onSelectClip: (Clip) -> Void
+    var onOpenMultiCamGroup: ((String) -> Void)?
 
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(clips) { clip in
-                    ClipListItemView(clip: clip, isSelected: selectedClip?.id == clip.id) {
-                        selectedClip = clip
-                    }
+                    let multiCam = clip.cameraGroupId.map { clipStore.hasMultipleAngles(forGroupId: $0) } ?? false
+                    ClipListItemView(
+                        clip: clip,
+                        isSelected: selectedClip?.id == clip.id,
+                        hasMultiCam: multiCam,
+                        onSelect: { onSelectClip(clip) },
+                        onOpenMultiCam: { gid in onOpenMultiCamGroup?(gid) }
+                    )
                     Divider()
                 }
             }
@@ -696,55 +744,75 @@ private struct ClipListView: View {
 private struct ClipListItemView: View {
     let clip: Clip
     let isSelected: Bool
+    let hasMultiCam: Bool
     let onSelect: () -> Void
+    let onOpenMultiCam: (String) -> Void
 
     var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 12) {
+        HStack(spacing: 12) {
+            ZStack(alignment: .topTrailing) {
                 ThumbnailView(clip: clip)
                     .frame(width: 120, height: 68)
                     .cornerRadius(6)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(URL(fileURLWithPath: clip.sourcePath).lastPathComponent)
-                        .font(.body)
-                        .fontWeight(.medium)
+                if hasMultiCam {
+                    Text("MC")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(3)
+                        .background(Color.purple.opacity(0.9))
+                        .foregroundColor(.white)
+                        .cornerRadius(3)
+                        .padding(3)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(URL(fileURLWithPath: clip.sourcePath).lastPathComponent)
+                    .font(.body)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+
+                if let contextLabel = clipContextLabel {
+                    Text(contextLabel)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                         .lineLimit(1)
-
-                    if let contextLabel = clipContextLabel {
-                        Text(contextLabel)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    HStack(spacing: 6) {
-                        Text(formatDuration(clip.duration))
-                        Text("•")
-                        Text("\(clip.sourceFps, specifier: "%.2f") fps")
-                        Text("•")
-                        Text(clip.sourceFormat.rawValue)
-                    }
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                    HStack(spacing: 8) {
-                        ReviewStatusBadge(status: clip.reviewStatus)
-                        ProxyStatusBadge(status: clip.proxyStatus)
-                        if let composite = clip.aiScores?.composite {
-                            AIScoreBadge(score: composite)
-                        }
-                    }
                 }
 
-                Spacer()
+                HStack(spacing: 6) {
+                    Text(formatDuration(clip.duration))
+                    Text("•")
+                    Text("\(clip.sourceFps, specifier: "%.2f") fps")
+                    Text("•")
+                    Text(clip.sourceFormat.rawValue)
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+                HStack(spacing: 8) {
+                    ReviewStatusBadge(status: clip.reviewStatus)
+                    ProxyStatusBadge(status: clip.proxyStatus)
+                    if let composite = clip.aiScores?.composite {
+                        AIScoreBadge(score: composite)
+                    }
+                }
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 6)
-            .background(isSelected ? Color.accentColor.opacity(0.08) : .clear)
-            .cornerRadius(8)
+
+            Spacer()
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 6)
+        .background(isSelected ? Color.accentColor.opacity(0.08) : .clear)
+        .cornerRadius(8)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            if hasMultiCam, let gid = clip.cameraGroupId {
+                onOpenMultiCam(gid)
+            }
+        }
+        .onTapGesture(count: 1) {
+            onSelect()
+        }
     }
 
     private func formatDuration(_ seconds: Double) -> String {
