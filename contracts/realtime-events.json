@@ -1,5 +1,5 @@
 {
-  "version": "1.1",
+  "version": "1.2",
   "author": "gemini-code-assist",
   "description": "Supabase Realtime event schema for SLATE. Desktop app and web portal both subscribe to these channels.",
   "channels": {
@@ -18,6 +18,13 @@
             "annotationId": "string (UUID)",
             "resolvedAt": "string (ISO 8601)",
             "resolvedBy": "string (userId)"
+          }
+        },
+        "annotation_reply_added": {
+          "description": "A threaded reply was posted on an annotation (web portal and API emit this; desktop should refresh annotation threads).",
+          "payload": {
+            "annotationId": "string (UUID)",
+            "reply": "AnnotationReply (see contracts/data-model.json if present) or opaque JSON from broadcaster"
           }
         },
         "review_status_changed": {

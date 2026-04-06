@@ -434,20 +434,6 @@ struct SyncStatusBadge: View {
     }
 }
 
-struct AIScoreBadge: View {
-    let score: Double
-
-    var body: some View {
-        Text("AI \(Int(score.rounded()))")
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.pink.opacity(0.16))
-            .foregroundColor(.pink)
-            .cornerRadius(4)
-    }
-}
-
 enum ViewMode: CaseIterable {
     case grid
     case list

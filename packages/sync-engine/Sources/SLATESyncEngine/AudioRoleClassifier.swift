@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import Foundation
 import SLATESharedTypes
 
@@ -262,12 +263,99 @@ public struct AudioRoleClassifier {
     }
     
     private func nextPowerOf2(_ n: Int) -> Int {
-        return 1 << Int(ceil(log2(Float(n))))
+        return 1 << Int(ceil(log2(Float(max(2, n)))))
     }
-    
+
+    /// Magnitude spectrum (half FFT bins) for MFCC mel filtering — mirrors the ai-pipeline helper pattern.
+    private func computeFFTMagnitudes(_ frame: [Float]) -> [Float] {
+        guard !frame.isEmpty else { return [] }
+
+        let fftSize = nextPowerOf2(frame.count)
+        let halfSize = fftSize / 2
+        let log2n = vDSP_Length(log2(Double(fftSize)))
+        guard let setup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2)) else {
+            return []
+        }
+        defer { vDSP_destroy_fftsetup(setup) }
+
+        var padded = [Float](repeating: 0, count: fftSize)
+        for index in frame.indices where index < fftSize {
+            padded[index] = frame[index]
+        }
+
+        var real = [Float](repeating: 0, count: halfSize)
+        var imag = [Float](repeating: 0, count: halfSize)
+        var magnitudes = [Float](repeating: 0, count: halfSize)
+
+        real.withUnsafeMutableBufferPointer { realBuffer in
+            imag.withUnsafeMutableBufferPointer { imagBuffer in
+                var splitComplex = DSPSplitComplex(realp: realBuffer.baseAddress!, imagp: imagBuffer.baseAddress!)
+                padded.withUnsafeBufferPointer { paddedBuffer in
+                    paddedBuffer.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: halfSize) { complexBuffer in
+                        vDSP_ctoz(complexBuffer, 2, &splitComplex, 1, vDSP_Length(halfSize))
+                    }
+                }
+                vDSP_fft_zrip(setup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
+                vDSP_zvabs(&splitComplex, 1, &magnitudes, 1, vDSP_Length(halfSize))
+            }
+        }
+
+        return magnitudes
+    }
+
+    private func hzToMel(_ hz: Float) -> Float {
+        Float(2595.0 * log10(Double(1.0 + Double(hz) / 700.0)))
+    }
+
+    private func melToHz(_ mel: Float) -> Float {
+        Float(700.0 * (pow(10.0, Double(mel) / 2595.0) - 1.0))
+    }
+
+    /// Triangular mel filter bank (26 filters) over the FFT magnitude spectrum.
     private func applyMelFilterBank(_ samples: [Float]) -> [Float] {
-        // Simplified mel filter bank - returns 26 filter outputs
-        return (0..<26).map { _ in Float.random(in: 0...1) } // Placeholder
+        let mags = computeFFTMagnitudes(samples)
+        guard !mags.isEmpty else {
+            return [Float](repeating: 0, count: 26)
+        }
+
+        let fftSize = nextPowerOf2(samples.count)
+        let nyquist = Float(sampleRate / 2)
+        let lowMel = hzToMel(0)
+        let highMel = hzToMel(nyquist)
+        let nMelPoints = 28
+        var melPoints = [Float](repeating: 0, count: nMelPoints)
+        for i in 0..<nMelPoints {
+            let t = Float(i) / Float(nMelPoints - 1)
+            melPoints[i] = lowMel + t * (highMel - lowMel)
+        }
+
+        var energies = [Float](repeating: 0, count: 26)
+        let nBins = mags.count
+        let sr = Float(sampleRate)
+
+        for filterIdx in 0..<26 {
+            let leftHz = melToHz(melPoints[filterIdx])
+            let centerHz = melToHz(melPoints[filterIdx + 1])
+            let rightHz = melToHz(melPoints[filterIdx + 2])
+
+            for bin in 0..<nBins {
+                let freq = Float(bin) * sr / Float(fftSize)
+                if freq < leftHz || freq > rightHz { continue }
+
+                let power = mags[bin] * mags[bin]
+                let weight: Float
+                if freq <= centerHz {
+                    let denom = max(centerHz - leftHz, 1e-6)
+                    weight = (freq - leftHz) / denom
+                } else {
+                    let denom = max(rightHz - centerHz, 1e-6)
+                    weight = (rightHz - freq) / denom
+                }
+                energies[filterIdx] += power * weight
+            }
+        }
+
+        return energies
     }
     
     private func discreteCosineTransform(_ input: [Float], count: Int) -> [Float] {

@@ -77,6 +77,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `scripts/release-desktop.sh` and `scripts/build-root-swift.sh` for notarized DMG releases and canonical root SwiftPM builds
+- `SLATEIntegrationTests` target (`tests/IntegrationTests`) wired in the root `Package.swift`
+- Documentation: `docs/EXPORT_NLE_VALIDATION.md`, `docs/ROADMAP_PLATFORM_2.md`, `docs/REVIEW_PARITY_AND_E2E.md`
+- Playwright E2E coverage for the review **Transcript** tab (`apps/web/e2e/review.spec.ts`)
+
+### Changed
+- `AudioRoleClassifier` uses a real mel filter bank + FFT magnitudes (deterministic MFCCs)
+- `VisionScorerOptimized` exposure scoring uses `CIAreaAverage` mean luminance (Metal path uses `CIImage(mtlTexture:)`)
+- `docs/code-signing.md` and `docs/USER_GUIDE.md` aligned with actual bundle IDs and CLI layout
+- Desktop CI runs root integration tests after building `packages/shared-types` (no longer `continue-on-error`)
+
 ### Planned for 2.0.0
 - Real-time sync during recording
 - Cloud-based AI processing

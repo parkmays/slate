@@ -1,3 +1,5 @@
+# Web + Supabase CI. For root SwiftPM parity with desktop jobs, see desktop-ci.yml
+# and scripts/build-root-swift.sh (shared-types first, then swift test).
 name: CI/CD Pipeline
 
 on:

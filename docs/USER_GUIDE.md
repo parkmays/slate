@@ -88,26 +88,15 @@ let syncEngine = SyncEngine()
 
 ### Command Line Usage
 
+There is no single `slate-engine` shim in this repository. Use the **Swift packages** from your own tool or the **macOS app** for end-user flows. For headless ingest, the `slate-ingest` product is built from `packages/ingest-daemon` (see that package’s CLI target). The commands below are **illustrative** of the kind of workflow the libraries support; wire `SyncEngine` and `SLATEAIPipeline` in code instead of these exact flags.
+
 ```bash
-# Sync two audio files
-slate-engine sync \
-    --primary primary.wav \
-    --secondary secondary.wav \
-    --fps 24 \
-    --output sync_result.json
+# After building packages — conceptual example only (not installed as `slate-engine`):
+# swift run --package-path packages/ingest-daemon slate-ingest …
 
-# Analyze a clip with AI
-slate-engine analyze \
-    --clip clip.json \
-    --output ai_scores.json
-
-# Process full pipeline
-slate-engine process \
-    --primary primary.wav \
-    --secondary secondary.wav \
-    --proxy proxy.mp4 \
-    --fps 24 \
-    --output results/
+# Develop and test sync/AI from SwiftPM:
+# (cd packages/sync-engine && swift test)
+# (cd packages/ai-pipeline && swift test)
 ```
 
 ---

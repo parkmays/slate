@@ -32,7 +32,7 @@ This document explains how to set up and maintain code signing for the SLATE des
 ### Team ID and Bundle Identifier
 
 - **Team ID**: Found in Apple Developer portal (10-character string)
-- **Bundle ID**: `com.mountaintoppictures.slate`
+- **Bundle ID (this repo):** `com.mountaintop.slate` for the **SLATE** app target and for `scripts/build-desktop-app.sh` (`SLATE_DESKTOP_BUNDLE_ID`). Use the same string in Xcode **Signing & Capabilities** and in the Apple Developer identifier list. If you use a different reverse-DNS id (for example `com.mountaintoppictures.slate`), set it consistently in Xcode, entitlements, and `SLATE_DESKTOP_BUNDLE_ID`.
 - **App Store Connect**: Not required for direct distribution
 
 ## Setup Instructions
@@ -45,7 +45,7 @@ Open `apps/desktop/SLATE.xcodeproj` and configure:
    - Select SLATE project
    - Signing & Capabilities tab
    - Team: Select your developer account
-   - Bundle Identifier: `com.mountaintoppictures.slate`
+   - Bundle Identifier: `com.mountaintop.slate` (or your team’s chosen id, matching the scripts above)
 
 2. **Code Signing Identity**
    - Debug: Apple Development
@@ -93,7 +93,7 @@ Create `apps/desktop/SLATE.entitlements`:
     <!-- XPC Services -->
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>group.com.mountaintoppictures.slate</string>
+        <string>group.com.mountaintop.slate</string>
     </array>
 </dict>
 </plist>
@@ -146,12 +146,23 @@ The GitHub Actions workflow automatically handles code signing:
 
 ## Notarization Process
 
+### One-shot local release (recommended)
+
+From the repo root, after exporting a **Developer ID**–signed app (or ad-hoc `codesign` for dry runs):
+
+```bash
+# Builds the SwiftPM desktop bundle, creates dist/desktop/SLATE-<version>.dmg, submits app + DMG to notarytool.
+bash scripts/release-desktop.sh --release
+```
+
+Environment variables are the same as for `scripts/notarize-desktop-app.sh` (for example `SLATE_NOTARY_KEYCHAIN_PROFILE` or `SLATE_NOTARY_APPLE_ID` + `SLATE_NOTARY_TEAM_ID` + `SLATE_NOTARY_APP_PASSWORD`). Signing identity for the app bundle: `SLATE_DESKTOP_CODESIGN_IDENTITY`.
+
 ### Manual Notarization
 
 ```bash
-# 1. Create DMG
+# 1. Create DMG (or use scripts/package-desktop-dmg.sh)
 hdiutil create -volname "SLATE" \
-             -srcfolder "build/Release/SLATE.app" \
+             -srcfolder "dist/desktop/SLATE.app" \
              -ov -format UDZO \
              "SLATE.dmg"
 

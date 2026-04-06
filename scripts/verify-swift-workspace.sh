@@ -8,10 +8,11 @@ export LC_ALL=C
 export LANG=C
 export TZ=UTC
 
+# shared-types first (matches scripts/build-root-swift.sh) so root/desktop graphs see a warm module.
 PACKAGES=(
+  "packages/shared-types"
   "."
   "apps/desktop"
-  "packages/shared-types"
   "packages/sync-engine"
   "packages/ai-pipeline"
   "packages/ingest-daemon"

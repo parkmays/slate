@@ -56,8 +56,14 @@ fi
 
 submit_target() {
   local target_path="$1"
+  local required="${2:-0}"
+
   if [[ ! -e "$target_path" ]]; then
-    echo "Skipping missing target: $target_path"
+    if [[ "$required" == "1" ]]; then
+      echo "Required path not found: $target_path" >&2
+      exit 1
+    fi
+    echo "Skipping optional missing target: $target_path"
     return
   fi
 
@@ -86,5 +92,5 @@ submit_target() {
   echo "  $target_path"
 }
 
-submit_target "$APP_PATH"
-submit_target "$DMG_PATH"
+submit_target "$APP_PATH" "1"
+submit_target "$DMG_PATH" "0"

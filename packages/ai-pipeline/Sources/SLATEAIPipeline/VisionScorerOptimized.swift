@@ -268,15 +268,35 @@ private class OptimizedImageGenerator {
     }
     
     private func calculateExposureWithMetal(_ texture: MTLTexture, device: MTLDevice) -> Float {
-        // Similar Metal implementation for exposure scoring
-        return 50.0 // Placeholder
+        _ = device
+        if let ciImage = CIImage(mtlTexture: texture, options: nil) {
+            return exposureScoreFromMeanLuminance(ciImage)
+        }
+        return 0
     }
-    
+
     private func calculateExposureWithVImage(_ image: CIImage) -> Float {
-        guard let cgImage = ciContext.createCGImage(image, from: image.extent) else { return 0 }
-        let totalPixels = max(cgImage.width * cgImage.height, 1)
-        // Lightweight stand-in until histogram path is wired to current vImage APIs.
-        return Float(min(100, 80 + Double(totalPixels % 97) / 10))
+        exposureScoreFromMeanLuminance(image)
+    }
+
+    /// Maps average frame luminance to a 0–100 score (100 = neutral mid-gray exposure).
+    private func exposureScoreFromMeanLuminance(_ image: CIImage) -> Float {
+        guard let filter = CIFilter(name: "CIAreaAverage") else { return 0 }
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgRect: image.extent), forKey: kCIInputExtentKey)
+        guard let output = filter.outputImage else { return 0 }
+        let rect = output.extent.integral
+        guard let cgImage = ciContext.createCGImage(output, from: rect),
+              let data = cgImage.dataProvider?.data,
+              let ptr = CFDataGetBytePtr(data) else {
+            return 0
+        }
+        let r = Float(ptr[0]) / 255
+        let g = Float(ptr[1]) / 255
+        let b = Float(ptr[2]) / 255
+        let lum = 0.299 * r + 0.587 * g + 0.114 * b
+        let deviation = abs(lum - 0.5)
+        return max(0, min(100, 100 - deviation * 200))
     }
 }
 

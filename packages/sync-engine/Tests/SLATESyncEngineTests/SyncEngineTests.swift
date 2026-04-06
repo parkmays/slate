@@ -32,6 +32,19 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(tracks[0].trackIndex, 0)
     }
 
+    func testRoleClassifier_sameFileTwice_isDeterministic() async throws {
+        let url = try makeSilentAudioFile(duration: 3.0, label: "deterministic_role")
+        let classifier = AudioRoleClassifier()
+        let a = try await classifier.classifyRole(audioURL: url)
+        let b = try await classifier.classifyRole(audioURL: url)
+        XCTAssertEqual(a.role, b.role)
+        XCTAssertEqual(a.confidence, b.confidence, accuracy: 1e-5)
+        XCTAssertEqual(a.features.mfcc.count, b.features.mfcc.count)
+        for i in 0..<a.features.mfcc.count {
+            XCTAssertEqual(a.features.mfcc[i], b.features.mfcc[i], accuracy: 1e-4)
+        }
+    }
+
     func testRoleAssignment_loudAiryTrack_returnsBoom() async {
         // High airiness (diff-to-rms ratio > 0.85) → boom
         let boomURL = try! makeSyntheticAudioFile(

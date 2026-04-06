@@ -8,8 +8,9 @@
 // without knowing Supabase directly:
 //
 //   clip:{clipId} channel
-//     annotation_added      → .annotationAdded
-//     annotation_resolved   → .annotationUpdated
+//     annotation_added         → .annotationAdded
+//     annotation_reply_added   → .annotationUpdated
+//     annotation_resolved      → .annotationUpdated
 //     review_status_changed → .clipUpdated
 //     proxy_status_changed  → .clipUpdated
 //     ai_scores_ready       → .clipUpdated
@@ -123,6 +124,7 @@ public final class RealtimeManager {
 
         // Capture all event streams before subscribing.
         let annotationAddedStream    = channel.broadcastStream(event: "annotation_added")
+        let annotationReplyStream      = channel.broadcastStream(event: "annotation_reply_added")
         let annotationResolvedStream = channel.broadcastStream(event: "annotation_resolved")
         let reviewChangedStream      = channel.broadcastStream(event: "review_status_changed")
         let proxyChangedStream       = channel.broadcastStream(event: "proxy_status_changed")
@@ -134,6 +136,11 @@ public final class RealtimeManager {
                 group.addTask {
                     for await payload in annotationAddedStream {
                         await self?.postClipNotification(.annotationAdded, clipId: clipId, payload: payload)
+                    }
+                }
+                group.addTask {
+                    for await payload in annotationReplyStream {
+                        await self?.postClipNotification(.annotationUpdated, clipId: clipId, payload: payload)
                     }
                 }
                 group.addTask {

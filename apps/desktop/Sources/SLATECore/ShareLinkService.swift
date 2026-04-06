@@ -1,15 +1,13 @@
 // SLATE — ShareLinkService
 // Owned by: Claude Code
 //
-// C3: HTTP wrapper around the Supabase edge functions defined in contracts/web-api.json.
-// Provides share-link generation and proxy URL signing.
+// C3/C4: HTTP wrapper around the Supabase edge functions defined in contracts/web-api.json.
+// Provides share-link generation and proxy URL signing using real Supabase JWTs from
+// `SupabaseManager.session` (see `generateShareLink(..., jwt:)` and `signProxyURL`).
 //
 // Configuration: set environment variables before launching:
 //   SLATE_SUPABASE_URL      https://{project}.supabase.co
 //   SLATE_SUPABASE_ANON_KEY  (anon/public key, not service role)
-//
-// In C4 the JWT will come from a real Supabase Auth session; for now a
-// placeholder string is passed so the service compiles and the UI is wired.
 
 import Foundation
 

@@ -86,8 +86,9 @@ jobs:
           swift test --enable-code-coverage
 
       - name: Root Swift package (integration tests)
-        continue-on-error: true
-        run: swift test -c release --filter SLATEIntegrationTests
+        run: |
+          (cd packages/shared-types && swift build -c release)
+          swift test -c release --filter SLATEIntegrationTests
 
       - name: Build Desktop App
         run: |

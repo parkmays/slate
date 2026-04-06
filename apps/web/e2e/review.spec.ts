@@ -179,3 +179,11 @@ test('AI scores panel renders all gauge rows for a scored clip', async ({ page }
   await expect(page.getByText('Stability')).toBeVisible()
   await expect(page.getByText('Audio')).toBeVisible()
 })
+
+test('Transcript tab shows mock transcript segments from review fixtures', async ({ page }) => {
+  await page.goto('/review/playwright-valid-token')
+
+  await page.getByRole('button', { name: 'Transcript' }).click()
+  await expect(page.getByText('The line lands cleanly here.')).toBeVisible()
+  await expect(page.getByText('Try a softer pickup on the second sentence.')).toBeVisible()
+})

@@ -142,5 +142,15 @@ let package = Package(
             ],
             path: "packages/export-writers/Tests/ExportWritersTests"
         ),
+        .testTarget(
+            name: "SLATEIntegrationTests",
+            dependencies: [
+                "SLATESharedTypes",
+                "SLATESyncEngine",
+                "SLATEAIPipeline",
+                "ExportWriters"
+            ],
+            path: "tests/IntegrationTests"
+        ),
     ]
 )
