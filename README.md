@@ -11,6 +11,7 @@ macOS tooling for editorial dailies: **ingest**, **proxy generation**, **audio s
 | `apps/desktop/` | **SLATE** macOS app (`SLATE.xcodeproj`, SwiftPM targets `SLATECore` / `SLATEUI`) |
 | `apps/web/` | Web portal (if present) |
 | `contracts/` | JSON API/data contracts + `storage.md` (R2 key conventions) |
+| `integrations/adobe-uxp-premiere/` | Optional **Premiere Pro UXP** panel (Frame.io V4 `GET /v4/me` probe; see `docs/ADOBE_INTEGRATION.md`) |
 | `supabase/` | SQL migrations and Edge Functions |
 | `tests/IntegrationTests/` | SwiftPM integration tests (via root `Package.swift`) |
 | `scripts/` | Build, test, desktop packaging, contract validation |
@@ -24,14 +25,21 @@ macOS tooling for editorial dailies: **ingest**, **proxy generation**, **audio s
 
 ## Build: engine packages (SwiftPM)
 
-From this directory (the repo root), the unified `Package.swift` is the canonical layout for **integration tests** and cross-package development. Some targets may require a **clean compile pass** on `packages/shared-types` (Swift 6 concurrency and Accelerate imports) before `swift build` succeeds at the root; until then, build packages individually (below).
+From this directory (the repo root), the unified `Package.swift` is the canonical layout for **integration tests** and cross-package development. If `swift build` fails on the first try, build **`packages/shared-types`** first (same order CI uses), then build and test the root package:
 
 ```bash
-swift build -c release   # when the tree compiles cleanly
-swift test
+bash scripts/build-root-swift.sh release
 ```
 
-To build each package in isolation (as in CI):
+Equivalent manual steps:
+
+```bash
+(cd packages/shared-types && swift build -c release)
+swift build -c release
+swift test -c release
+```
+
+To build each package in isolation (as in per-package CI):
 
 ```bash
 (cd packages/sync-engine && swift build -c release && swift test)
@@ -39,7 +47,7 @@ To build each package in isolation (as in CI):
 (cd packages/ingest-daemon && swift build -c release && swift test)
 ```
 
-Helper scripts:
+Other helper scripts:
 
 ```bash
 ./scripts/build.sh release
@@ -56,7 +64,11 @@ Helper scripts:
 bash scripts/build-desktop-app.sh --release
 ```
 
-Notarization and DMG steps are documented in `docs/code-signing.md` and `scripts/notarize-desktop-app.sh` / `scripts/package-desktop-dmg.sh`.
+**DMG:** `bash scripts/package-desktop-dmg.sh --release` (builds the app, then creates `dist/desktop/SLATE-*.dmg`).
+
+**Notarized release (local):** after signing credentials are configured, run `bash scripts/release-desktop.sh --release` to build, package a DMG, and submit the app + DMG to Apple notarytool (see `docs/code-signing.md`). Individual steps: `scripts/notarize-desktop-app.sh`, `scripts/package-desktop-dmg.sh`.
+
+**Bundle ID:** the SwiftPM packaging script defaults to `com.mountaintop.slate` (`SLATE_DESKTOP_BUNDLE_ID`). Xcode’s **SLATE** target uses the same identifier in `SLATE.xcodeproj`; align with your Developer ID provisioning if you change it.
 
 ## Contracts & backend
 
@@ -71,5 +83,9 @@ This repo is intended to be the **canonical** Git root for SLATE (see `docs/inte
 ## Documentation
 
 - User-facing guide: `docs/USER_GUIDE.md`
-- Code signing: `docs/code-signing.md`
+- Code signing & notarized release: `docs/code-signing.md` (see also `scripts/release-desktop.sh`)
+- NLE export QA checklist: `docs/EXPORT_NLE_VALIDATION.md`
+- Platform 2.0 slice order: `docs/ROADMAP_PLATFORM_2.md`
+- Web/desktop review & E2E: `docs/REVIEW_PARITY_AND_E2E.md`
+- Adobe / Frame.io V4 / UXP: `docs/ADOBE_INTEGRATION.md`
 - Internal notes: `docs/internal/`
