@@ -1,0 +1,99 @@
+# Manual iOS distribution pipeline (archive → export → upload).
+# Wire Apple signing + App Store Connect API key secrets before relying on this in production.
+name: iOS Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: 'Xcode configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - Debug
+      upload:
+        description: 'If true, run upload step (requires API key + secrets)'
+        required: true
+        default: false
+        type: boolean
+
+env:
+  PROJECT_DIR: apps/mobile-ios
+  SCHEME: SLATEMobile
+
+jobs:
+  archive-export:
+    name: Archive and export IPA
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.2'
+
+      - name: Version from VERSION file
+        id: ver
+        run: |
+          echo "marketing=$(cat VERSION | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare build directory
+        run: mkdir -p build/ios
+
+      # Placeholder: import signing assets from secrets (p12 + profiles) if you use manual signing.
+      # - name: Install certificates
+      #   uses: apple-actions/import-certificate@v2
+      #   with:
+      #     p12-file-base64: ${{ secrets.IOS_DISTRIBUTION_CERT_BASE64 }}
+      #     p12-password: ${{ secrets.IOS_DISTRIBUTION_CERT_PASSWORD }}
+
+      - name: Archive
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          MARKETING_VERSION: ${{ steps.ver.outputs.marketing }}
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project SLATEMobile.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration "${{ inputs.configuration }}" \
+            -archivePath "$GITHUB_WORKSPACE/build/ios/SLATEMobile.xcarchive" \
+            -destination 'generic/platform=iOS' \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}"
+
+      - name: Export IPA
+        run: |
+          set -euo pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$GITHUB_WORKSPACE/build/ios/SLATEMobile.xcarchive" \
+            -exportPath "$GITHUB_WORKSPACE/build/ios/export" \
+            -exportOptionsPlist "$GITHUB_WORKSPACE/apps/mobile-ios/ExportOptions-appstore.plist"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SLATEMobile-ipa
+          path: build/ios/export/*.ipa
+          if-no-files-found: warn
+
+      - name: Upload to App Store Connect (placeholder)
+        if: inputs.upload == true
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          API_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${API_KEY_ID:-}" || -z "${API_ISSUER_ID:-}" || -z "${API_PRIVATE_KEY:-}" ]]; then
+            echo "::warning::Missing App Store Connect API key secrets — configure APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_API_ISSUER_ID, APP_STORE_CONNECT_API_PRIVATE_KEY, then use Transporter or xcrun altool (see docs/SHIPPING_RUNBOOK.md)."
+            ls -la "$GITHUB_WORKSPACE/build/ios/export/" || true
+            exit 0
+          fi
+          echo "API key secrets are present; add Transporter CLI or fastlane pilot upload here. IPA:"
+          ls -la "$GITHUB_WORKSPACE/build/ios/export/"/*.ipa

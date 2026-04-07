@@ -10,12 +10,13 @@ macOS tooling for editorial dailies: **ingest**, **proxy generation**, **audio s
 | `packages/` | Swift packages: `shared-types`, `sync-engine`, `ai-pipeline`, `ingest-daemon`, `export-writers` |
 | `apps/desktop/` | **SLATE** macOS app (`SLATE.xcodeproj`, SwiftPM targets `SLATECore` / `SLATEUI`) |
 | `apps/web/` | Web portal (if present) |
+| `apps/mobile-ios/` | **SLATE Mobile** iOS app (`SLATEMobile.xcodeproj`) |
 | `contracts/` | JSON API/data contracts + `storage.md` (R2 key conventions) |
 | `integrations/adobe-uxp-premiere/` | Optional **Premiere Pro UXP** panel (Frame.io V4 `GET /v4/me` probe; see `docs/ADOBE_INTEGRATION.md`) |
 | `supabase/` | SQL migrations and Edge Functions |
 | `tests/IntegrationTests/` | SwiftPM integration tests (via root `Package.swift`) |
 | `scripts/` | Build, test, desktop packaging, contract validation |
-| `.github/workflows/` | CI (desktop build, benchmarks, security scans) |
+| `.github/workflows/` | CI (web + Supabase, desktop, iOS, benchmarks, security scans) |
 
 ## Prerequisites
 
@@ -82,6 +83,7 @@ This repo is intended to be the **canonical** Git root for SLATE (see `docs/inte
 
 ## Documentation
 
+- Shipping (desktop, web, iOS): `docs/SHIPPING_RUNBOOK.md` and `docs/RELEASE_CHECKLIST.md`
 - User-facing guide: `docs/USER_GUIDE.md`
 - Code signing & notarized release: `docs/code-signing.md` (see also `scripts/release-desktop.sh`)
 - NLE export QA checklist: `docs/EXPORT_NLE_VALIDATION.md`
