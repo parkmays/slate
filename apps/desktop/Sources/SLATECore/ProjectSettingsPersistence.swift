@@ -3,9 +3,11 @@
 
 import Foundation
 import SLATESharedTypes
+import os.log
 
 public enum ProjectSettingsPersistence {
     private static let defaultsKey = "SLATE.projectDeliverySettings.v1"
+    private static let logger = Logger(subsystem: "com.mountaintop.slate", category: "ProjectSettingsPersistence")
 
     private struct Persisted: Codable, Sendable {
         var notificationTargets: [DeliveryTarget]
@@ -19,29 +21,44 @@ public enum ProjectSettingsPersistence {
 
     public static func merge(into project: Project) -> Project {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey),
-              !data.isEmpty,
-              let all = try? JSONDecoder().decode([String: Persisted].self, from: data),
-              let p = all[project.id] else {
+              !data.isEmpty else {
+            logger.debug("No persisted settings found for project \(project.id)")
             return project
         }
+        
+        do {
+            let all = try JSONDecoder().decode([String: Persisted].self, from: data)
+            guard let p = all[project.id] else {
+                logger.debug("No settings found for project \(project.id)")
+                return project
+            }
 
-        return Project(
-            id: project.id,
-            name: project.name,
-            mode: project.mode,
-            createdAt: project.createdAt,
-            updatedAt: project.updatedAt,
-            notificationTargets: p.notificationTargets,
-            autoDeliverOnAssembly: p.autoDeliverOnAssembly,
-            digestTargets: p.digestTargets,
-            digestHour: min(23, max(0, p.digestHour)),
-            dailyDigestEnabled: p.dailyDigestEnabled,
-            airtableAPIKey: project.airtableAPIKey,
-            airtableBaseId: project.airtableBaseId,
-            shotgridScriptName: project.shotgridScriptName,
-            shotgridApplicationKey: project.shotgridApplicationKey,
-            shotgridSite: project.shotgridSite
-        )
+            let mergedProject = Project(
+                id: project.id,
+                name: project.name,
+                mode: project.mode,
+                createdAt: project.createdAt,
+                updatedAt: project.updatedAt,
+                notificationTargets: p.notificationTargets,
+                autoDeliverOnAssembly: p.autoDeliverOnAssembly,
+                digestTargets: p.digestTargets,
+                digestHour: min(23, max(0, p.digestHour)),
+                dailyDigestEnabled: p.dailyDigestEnabled,
+                airtableAPIKey: project.airtableAPIKey,
+                airtableBaseId: project.airtableBaseId,
+                shotgridScriptName: project.shotgridScriptName,
+                shotgridApplicationKey: project.shotgridApplicationKey,
+                shotgridSite: project.shotgridSite
+            )
+            
+            logger.info("Successfully merged persisted settings for project \(project.id)")
+            return mergedProject
+            
+        } catch {
+            logger.error("Failed to decode persisted settings: \(error.localizedDescription)")
+            // Return original project if decode fails
+            return project
+        }
     }
 
     public static func save(_ project: Project) {
@@ -62,21 +79,37 @@ public enum ProjectSettingsPersistence {
             selectedTranscodeProfileId: all[project.id]?.selectedTranscodeProfileId
         )
 
-        if let data = try? JSONEncoder().encode(all) {
+        do {
+            let data = try JSONEncoder().encode(all)
             UserDefaults.standard.set(data, forKey: defaultsKey)
+            logger.info("Successfully saved settings for project \(project.id)")
+        } catch {
+            logger.error("Failed to encode project settings: \(error.localizedDescription)")
+            // In production, you might want to show an alert to the user
         }
     }
 
     public static func loadTranscodeProfiles(projectId: String) -> (profiles: [ProxyTranscodeProfile], selectedProfileId: String?) {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey),
-              !data.isEmpty,
-              let all = try? JSONDecoder().decode([String: Persisted].self, from: data),
-              let project = all[projectId]
-        else {
+              !data.isEmpty else {
+            logger.debug("No transcode profiles found for project \(projectId)")
             return ([.slateDefault], nil)
         }
-        let profiles = (project.transcodeProfiles?.isEmpty == false) ? (project.transcodeProfiles ?? [.slateDefault]) : [.slateDefault]
-        return (profiles, project.selectedTranscodeProfileId)
+        
+        do {
+            let all = try JSONDecoder().decode([String: Persisted].self, from: data)
+            guard let project = all[projectId] else {
+                logger.debug("No transcode profiles for project \(projectId)")
+                return ([.slateDefault], nil)
+            }
+            let profiles = (project.transcodeProfiles?.isEmpty == false) ? (project.transcodeProfiles ?? [.slateDefault]) : [.slateDefault]
+            logger.debug("Loaded \(profiles.count) transcode profiles for project \(projectId)")
+            return (profiles, project.selectedTranscodeProfileId)
+            
+        } catch {
+            logger.error("Failed to decode transcode profiles: \(error.localizedDescription)")
+            return ([.slateDefault], nil)
+        }
     }
 
     public static func saveTranscodeProfiles(projectId: String, profiles: [ProxyTranscodeProfile], selectedProfileId: String?) {
@@ -104,8 +137,12 @@ public enum ProjectSettingsPersistence {
             transcodeProfiles: profiles,
             selectedTranscodeProfileId: selectedProfileId
         )
-        if let encoded = try? JSONEncoder().encode(all) {
+        do {
+            let encoded = try JSONEncoder().encode(all)
             UserDefaults.standard.set(encoded, forKey: defaultsKey)
+            logger.info("Successfully saved \(profiles.count) transcode profiles for project \(projectId)")
+        } catch {
+            logger.error("Failed to encode transcode profiles: \(error.localizedDescription)")
         }
     }
 }

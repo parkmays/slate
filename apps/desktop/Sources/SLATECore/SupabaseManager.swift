@@ -16,9 +16,11 @@
 
 import Foundation
 import Supabase
+import os.log
 
 @MainActor
 public final class SupabaseManager: ObservableObject {
+    private static let logger = Logger(subsystem: "com.mountaintop.slate", category: "SupabaseManager")
 
     // MARK: - Published state
 
@@ -50,15 +52,28 @@ public final class SupabaseManager: ObservableObject {
         let urlStr = ProcessInfo.processInfo.environment["SLATE_SUPABASE_URL"] ?? ""
         let key    = ProcessInfo.processInfo.environment["SLATE_SUPABASE_ANON_KEY"] ?? ""
 
+        Self.logger.info("Initializing SupabaseManager")
+        
+        if urlStr.isEmpty {
+            Self.logger.warning("SLATE_SUPABASE_URL environment variable not set")
+        }
+        if key.isEmpty {
+            Self.logger.warning("SLATE_SUPABASE_ANON_KEY environment variable not set")
+        }
+
         if let url = Self.validSupabaseURL(from: urlStr), Self.isLikelyJWT(key) {
             let c = SupabaseClient(supabaseURL: url, supabaseKey: key)
             self.client       = c
             self.isConfigured = true
             self.realtime     = RealtimeManager(client: c)
+            Self.logger.info("Supabase client configured successfully")
         } else {
             self.client       = nil
             self.isConfigured = false
             self.realtime     = RealtimeManager(client: nil)
+            if !urlStr.isEmpty || !key.isEmpty {
+                Self.logger.error("Supabase configuration invalid - check URL and API key format")
+            }
         }
     }
 
@@ -148,23 +163,61 @@ public final class SupabaseManager: ObservableObject {
     }
 
     private static func validSupabaseURL(from urlString: String) -> URL? {
-        guard !urlString.isEmpty, let url = URL(string: urlString), url.scheme != nil, url.host != nil else {
+        guard !urlString.isEmpty else {
+            logger.debug("URL string is empty")
             return nil
         }
+        
+        guard let url = URL(string: urlString) else {
+            logger.error("Invalid URL format: \(urlString)")
+            return nil
+        }
+        
+        guard url.scheme != nil else {
+            logger.error("URL missing scheme: \(urlString)")
+            return nil
+        }
+        
+        guard url.host != nil else {
+            logger.error("URL missing host: \(urlString)")
+            return nil
+        }
+        
+        // Validate it's a Supabase URL
+        if url.host?.contains("supabase.co") != true {
+            logger.warning("URL does not appear to be a Supabase URL: \(urlString)")
+            // Still allow it for development/testing
+        }
+        
         return url
     }
 
     private static func isLikelyJWT(_ value: String) -> Bool {
         guard !value.isEmpty else {
+            logger.debug("JWT value is empty")
             return false
         }
 
         let segments = value.split(separator: ".")
         guard segments.count == 3 else {
+            logger.error("JWT does not have 3 segments (found \(segments.count))")
             return false
         }
 
-        return segments[1].base64URLDecodedData != nil
+        guard let payloadData = segments[1].base64URLDecodedData else {
+            logger.error("JWT payload segment is not valid base64url")
+            return false
+        }
+        
+        // Optional: Decode and validate basic JWT structure
+        do {
+            _ = try JSONSerialization.jsonObject(with: payloadData)
+            logger.debug("JWT payload appears valid")
+            return true
+        } catch {
+            logger.error("JWT payload is not valid JSON: \(error.localizedDescription)")
+            return false
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 // SLATE — Canonical Clip data model (Swift)
-// Source of truth: contracts/data-model.json (version 1.0)
+// Source of truth: contracts/data-model.json (version 1.4)
 // Author: Claude Code (Orchestrator)
 //
 // Mirrors packages/shared-types/src/clip.ts exactly.

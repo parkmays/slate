@@ -14,10 +14,10 @@ If your footage is currently elsewhere, copy or symlink it into that directory b
 1. Launch desktop app.
 2. If auth is shown, click **Continue Offline** for local demo mode.
 3. Open walkthrough and follow:
-   - project selection
-   - import footage
-   - clip review / detail
-   - share/review context
+  - project selection
+  - import footage
+  - clip review / detail
+  - share/review context
 4. Import from the fixture folder above.
 5. Open one clip in detail and verify local proxy playback.
 6. Open multicam for one grouped shot (if present).

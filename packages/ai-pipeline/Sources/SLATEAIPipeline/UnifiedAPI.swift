@@ -172,7 +172,12 @@ public struct SLATEAPI {
         primaryAudio: URL,
         secondaryAudio: URL,
         proxyVideo: URL,
-        fps: Double
+        fps: Double,
+        projectId: String? = nil,
+        checksum: String? = nil,
+        sourceSize: Int64? = nil,
+        duration: Double? = nil,
+        timecodeStart: String? = nil
     ) async throws -> ProcessedClipResult {
         logger.info("Starting full pipeline processing")
 
@@ -192,7 +197,12 @@ public struct SLATEAPI {
             proxyVideo: proxyVideo,
             fps: fps,
             syncResult: syncResult,
-            audioTracks: audioTracks
+            audioTracks: audioTracks,
+            projectId: projectId,
+            checksum: checksum,
+            sourceSize: sourceSize,
+            duration: duration,
+            timecodeStart: timecodeStart
         )
 
         let aiResult = try await aiAPI.analyzeClip(clip)
@@ -235,7 +245,12 @@ public struct SLATEAPI {
         proxyVideo: URL,
         fps: Double,
         syncResult: MultiCamSyncResult,
-        audioTracks: [AudioTrack]
+        audioTracks: [AudioTrack],
+        projectId: String?,
+        checksum: String?,
+        sourceSize: Int64?,
+        duration: Double?,
+        timecodeStart: String?
     ) -> Clip {
         let offset = syncResult.offsets.first
         let clipSync = SyncResult(
@@ -245,16 +260,45 @@ public struct SLATEAPI {
             driftPPM: 0
         )
 
+        // Generate a unique ID for this clip
+        let clipId = UUID().uuidString
+        
+        // Use provided project ID or generate a temporary one
+        let clipProjectId = projectId ?? UUID().uuidString
+        
+        // Use provided checksum or generate a placeholder
+        let clipChecksum = checksum ?? "pending-\(clipId)"
+        
+        // Use provided source size or calculate from file
+        let clipSourceSize: Int64
+        if let size = sourceSize {
+            clipSourceSize = size
+        } else {
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: primaryAudio.path)
+                clipSourceSize = (attributes[.size] as? Int64) ?? 0
+            } catch {
+                clipSourceSize = 0
+                logger.warning("Could not determine file size", metadata: ["error": error.localizedDescription])
+            }
+        }
+        
+        // Use provided duration or estimate from sync result
+        let clipDuration = duration ?? 30.0
+        
+        // Use provided timecode start or default
+        let clipTimecodeStart = timecodeStart ?? "01:00:00:00"
+
         return Clip(
-            id: UUID().uuidString,
-            projectId: UUID().uuidString,
-            checksum: "temp",
+            id: clipId,
+            projectId: clipProjectId,
+            checksum: clipChecksum,
             sourcePath: primaryAudio.path,
-            sourceSize: 1_000_000,
+            sourceSize: clipSourceSize,
             sourceFormat: .proRes422HQ,
             sourceFps: fps,
-            sourceTimecodeStart: "01:00:00:00",
-            duration: 30,
+            sourceTimecodeStart: clipTimecodeStart,
+            duration: clipDuration,
             proxyPath: proxyVideo.path,
             proxyStatus: .ready,
             proxyChecksum: nil,
