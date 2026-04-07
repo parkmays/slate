@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import ReviewClient from './client'
 import PasswordGate from '@/components/PasswordGate'
 import { getMockReviewFixture } from '@/lib/review-mocks'
-import { hasValidReviewAccessCookie, reviewAccessCookieName } from '@/lib/review-auth'
+import { hasValidReviewAccessCookie, isShareLinkExpired, reviewAccessCookieName } from '@/lib/review-auth'
 import { loadReviewShareLink } from '@/lib/review-share-links'
 import {
   filterClipRowsForShareLink,
@@ -271,7 +271,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     description: 'This review link is no longer available.',
   } as const
 
-  if (!shareLink || isLinkRevoked(shareLink) || new Date(shareLink.expires_at) < new Date()) {
+  if (!shareLink || isLinkRevoked(shareLink) || isShareLinkExpired(shareLink.expires_at)) {
     return unavailable
   }
 
@@ -371,7 +371,7 @@ export default async function ReviewPage({ params, searchParams }: PageProps) {
     )
   }
 
-  if (new Date(shareLinkData.expires_at) < new Date()) {
+  if (isShareLinkExpired(shareLinkData.expires_at)) {
     return (
       <ReviewAccessState
         title="Review Link Expired"

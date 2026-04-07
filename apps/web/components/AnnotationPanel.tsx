@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { timecodeToSeconds } from '@/lib/timecode'
 import { cn, getAnnotationColor, getAnnotationIcon } from '@/lib/utils'
-import type { Annotation, AnnotationType } from '@/types'
+import type { Annotation, AnnotationType, SpatialAnnotationPayload } from '@/types'
 
 interface AnnotationPanelProps {
   annotations: Annotation[]
@@ -17,7 +17,13 @@ interface AnnotationPanelProps {
   permissions: {
     canComment: boolean
   }
-  onAddAnnotation: (type: AnnotationType, body: string, voiceUrl?: string | null) => Promise<void> | void
+  role: 'viewer' | 'commenter' | 'editor'
+  onAddAnnotation: (
+    type: AnnotationType,
+    body: string,
+    voiceUrl?: string | null,
+    spatialData?: SpatialAnnotationPayload | null
+  ) => Promise<void> | void
   onReply?: (annotationId: string, body: string) => Promise<void> | void
   onToggleResolved?: (annotationId: string, nextResolved: boolean) => Promise<void> | void
   onSelectAnnotation: (timecodeIn: string) => void
@@ -56,6 +62,7 @@ export function AnnotationPanel({
   currentTimecode,
   annotationSortFps = 24,
   permissions,
+  role,
   onAddAnnotation,
   onReply,
   onToggleResolved,
@@ -67,6 +74,7 @@ export function AnnotationPanel({
 }: AnnotationPanelProps) {
   const [draft, setDraft] = useState('')
   const [filter, setFilter] = useState<AnnotationType | 'all'>('all')
+  const [showMarkupOnly, setShowMarkupOnly] = useState(false)
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
@@ -82,9 +90,12 @@ export function AnnotationPanel({
   }, [])
 
   const filteredAnnotations = useMemo(() => {
-    const visible = filter === 'all'
+    const byType = filter === 'all'
       ? annotations
       : annotations.filter((annotation) => annotation.type === filter)
+    const visible = showMarkupOnly
+      ? byType.filter((annotation) => annotation.spatialData != null)
+      : byType
 
     const sortKey = (annotation: Annotation) => {
       if (typeof annotation.timeOffsetSeconds === 'number' && Number.isFinite(annotation.timeOffsetSeconds)) {
@@ -100,7 +111,7 @@ export function AnnotationPanel({
       }
       return left.timecodeIn.localeCompare(right.timecodeIn)
     })
-  }, [annotations, annotationSortFps, filter])
+  }, [annotations, annotationSortFps, filter, showMarkupOnly])
 
   async function handleSubmit() {
     const trimmed = draft.trim()
@@ -108,7 +119,7 @@ export function AnnotationPanel({
       return
     }
 
-    await onAddAnnotation('text', trimmed, null)
+    await onAddAnnotation('text', trimmed, null, null)
     setDraft('')
   }
 
@@ -170,7 +181,7 @@ export function AnnotationPanel({
         reader.onloadend = async () => {
           const voiceUrl = typeof reader.result === 'string' ? reader.result : null
           mediaRecorder.stream.getTracks().forEach((track) => track.stop())
-          await onAddAnnotation('voice', 'Voice note', voiceUrl)
+          await onAddAnnotation('voice', 'Voice note', voiceUrl, null)
           setIsRecording(false)
           setRecordingTime(0)
           mediaRecorderRef.current = null
@@ -221,7 +232,23 @@ export function AnnotationPanel({
               )}
             </Button>
           ))}
+          <Button
+            type="button"
+            variant={showMarkupOnly ? 'default' : 'outline'}
+            size="sm"
+            className="gap-1"
+            onClick={() => setShowMarkupOnly((v) => !v)}
+          >
+            <span>✏️</span>
+            <span>Markup</span>
+          </Button>
         </div>
+
+        {!permissions.canComment ? (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+            You are in View-Only mode. Access level: {role}.
+          </div>
+        ) : null}
       </div>
 
       <ScrollArea className="flex-1">
@@ -271,6 +298,11 @@ export function AnnotationPanel({
                               Resolved
                             </Badge>
                           ) : null}
+                          {annotation.spatialData ? (
+                            <Badge variant="outline" className="border-amber-500/40 text-amber-300">
+                              Markup
+                            </Badge>
+                          ) : null}
                           {replies.length > 0 ? (
                             <Badge variant="outline" className="border-zinc-700 text-zinc-400">
                               {replies.length} repl{replies.length === 1 ? 'y' : 'ies'}
@@ -287,7 +319,9 @@ export function AnnotationPanel({
                           </div>
                         ) : (
                           <p className="mt-2 text-sm leading-relaxed text-zinc-300">
-                            {renderMentionText(annotation.body)}
+                            {annotation.body.trim().length > 0
+                              ? renderMentionText(annotation.body)
+                              : (annotation.spatialData ? <span className="text-zinc-500">(drawing annotation)</span> : null)}
                           </p>
                         )}
                       </div>

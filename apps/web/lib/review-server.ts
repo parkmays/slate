@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { hasValidReviewAccessCookie, reviewAccessCookieName } from '@/lib/review-auth'
+import { hasValidReviewAccessCookie, isShareLinkExpired, reviewAccessCookieName } from '@/lib/review-auth'
 import { timecodeToSeconds } from '@/lib/timecode'
 import type {
   AnnotationType,
@@ -7,6 +7,7 @@ import type {
   ReviewAnnotationReply,
   ReviewAssemblyClipRange,
   ReviewAssemblyData,
+  ShareLinkRole,
   ReviewSharePermissions,
   ReviewShareLink,
   ReviewStatus,
@@ -41,7 +42,8 @@ interface ShareLinkAccessRecord {
   token: string
   scope: ReviewShareLink['scope']
   scope_id: string | null
-  expires_at: string
+  expires_at: string | null
+  role: ShareLinkRole | null
   password_hash: string | null
   permissions: ReviewSharePermissions | null
   revoked_at?: string | null
@@ -62,13 +64,33 @@ interface RequestCookieReader {
 }
 
 function normalizePermissions(
-  permissions: Partial<ReviewSharePermissions> | null | undefined
+  permissions: Partial<ReviewSharePermissions> | null | undefined,
+  role: ShareLinkRole | null
 ): ReviewSharePermissions {
+  if (role === 'viewer') {
+    return { canComment: false, canFlag: false, canRequestAlternate: false }
+  }
+
+  if (role === 'commenter') {
+    return { canComment: true, canFlag: false, canRequestAlternate: false }
+  }
+
+  if (role === 'editor') {
+    return { canComment: true, canFlag: true, canRequestAlternate: true }
+  }
+
   return {
     canComment: Boolean(permissions?.canComment),
     canFlag: Boolean(permissions?.canFlag),
     canRequestAlternate: Boolean(permissions?.canRequestAlternate),
   }
+}
+
+function normalizeRole(value: unknown): ShareLinkRole | null {
+  if (value === 'viewer' || value === 'commenter' || value === 'editor') {
+    return value
+  }
+  return null
 }
 
 function normalizeMentionTokens(text: string): string[] {
@@ -206,6 +228,24 @@ function parseTimeOffsetSeconds(record: Record<string, unknown>): number | null 
   return null
 }
 
+function parseSpatialData(record: Record<string, unknown>): ReviewAnnotation['spatialData'] {
+  const raw = record.spatial_data ?? record.spatialData
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+
+  const payload = raw as Record<string, unknown>
+  const version = payload.version
+  const shapes = payload.shapes
+  if (version !== 1 || !Array.isArray(shapes)) {
+    return null
+  }
+  return {
+    version: 1,
+    shapes: shapes as NonNullable<ReviewAnnotation['spatialData']>['shapes'],
+  }
+}
+
 export function clipPlaybackBounds(
   clip: Pick<ClipAccessRecord, 'duration_seconds' | 'frame_rate'>
 ): { durationSeconds: number; fps: number } {
@@ -260,6 +300,7 @@ export function normalizeAnnotation(record: Record<string, unknown>): ReviewAnno
     body: type === 'voice' ? (stringValue(record.voice_transcript) ?? '') : rawBody,
     type,
     voiceUrl,
+    spatialData: parseSpatialData(record),
     createdAt: stringValue(record.timestamp, record.created_at, record.createdAt) ?? new Date().toISOString(),
     resolvedAt,
     isResolved: Boolean(record.is_resolved ?? Boolean(resolvedAt)),
@@ -377,10 +418,10 @@ export async function requireShareLinkAccess(
   supabase: SupabaseClient,
   shareToken: string,
   request?: RequestCookieReader
-): Promise<ShareLinkAccessRecord & { permissions: ReviewSharePermissions }> {
+): Promise<ShareLinkAccessRecord & { permissions: ReviewSharePermissions; role: ShareLinkRole }> {
   const { data, error } = await supabase
     .from('share_links')
-    .select('id, project_id, token, scope, scope_id, expires_at, password_hash, permissions, revoked_at')
+    .select('id, project_id, token, scope, scope_id, expires_at, role, password_hash, permissions, revoked_at')
     .eq('token', shareToken)
     .single<ShareLinkAccessRecord>()
 
@@ -392,7 +433,7 @@ export async function requireShareLinkAccess(
     throw new ReviewRouteError('Share link has been revoked', 410)
   }
 
-  if (new Date(data.expires_at) < new Date()) {
+  if (isShareLinkExpired(data.expires_at)) {
     throw new ReviewRouteError('Share link has expired', 410)
   }
 
@@ -403,9 +444,17 @@ export async function requireShareLinkAccess(
     }
   }
 
+  const normalizedRole = normalizeRole(data.role)
+    ?? (
+      Boolean(data.permissions?.canFlag) || Boolean(data.permissions?.canRequestAlternate)
+        ? 'editor'
+        : (Boolean(data.permissions?.canComment) ? 'commenter' : 'viewer')
+    )
+
   return {
     ...data,
-    permissions: normalizePermissions(data.permissions),
+    role: normalizedRole,
+    permissions: normalizePermissions(data.permissions, normalizedRole),
   }
 }
 
@@ -446,6 +495,7 @@ export async function createAnnotationRecord(
     timeOffsetSeconds: number
     type: AnnotationType
     voiceUrl?: string | null
+    spatialData?: ReviewAnnotation['spatialData']
     userId?: string | null
   }
 ): Promise<ReviewAnnotation> {
@@ -465,6 +515,7 @@ export async function createAnnotationRecord(
       type: params.type,
       content,
       voice_url: params.voiceUrl ?? null,
+      spatial_data: params.spatialData ?? null,
       is_private: false,
       is_resolved: false,
       resolved_at: null,

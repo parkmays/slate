@@ -35,7 +35,7 @@ public struct TranscriptionService: Sendable {
 
     public init() {}
 
-    public func transcribe(audioURL: URL) async throws -> Transcript {
+    public func transcribe(audioURL: URL, knownSpeakers: [String] = []) async throws -> Transcript {
         let loadedAudio = try? await AudioHelpers.loadMonoSamples(from: audioURL)
         let diarizationSegments: [SpeakerSegment]
         if let loadedAudio {
@@ -51,7 +51,10 @@ public struct TranscriptionService: Sendable {
             return Transcript(
                 text: recognized.text,
                 language: recognized.language,
-                words: assignSpeakerLabels(words: recognized.words, segments: diarizationSegments)
+                words: mapKnownSpeakerNames(
+                    words: assignSpeakerLabels(words: recognized.words, segments: diarizationSegments),
+                    knownSpeakers: knownSpeakers
+                )
             )
         }
         #endif
@@ -59,7 +62,8 @@ public struct TranscriptionService: Sendable {
         return try await heuristicTranscript(
             audioURL: audioURL,
             preloadedAudio: loadedAudio,
-            diarizationSegments: diarizationSegments
+            diarizationSegments: diarizationSegments,
+            knownSpeakers: knownSpeakers
         )
     }
 
@@ -125,7 +129,8 @@ public struct TranscriptionService: Sendable {
     private func heuristicTranscript(
         audioURL: URL,
         preloadedAudio: (samples: [Float], sampleRate: Double, channels: Int)?,
-        diarizationSegments: [SpeakerSegment]
+        diarizationSegments: [SpeakerSegment],
+        knownSpeakers: [String]
     ) async throws -> Transcript {
         let loaded: (samples: [Float], sampleRate: Double, channels: Int)
         if let preloadedAudio {
@@ -225,7 +230,10 @@ public struct TranscriptionService: Sendable {
             }
         }
 
-        words = assignSpeakerLabels(words: words, segments: diarizationSegments)
+        words = mapKnownSpeakerNames(
+            words: assignSpeakerLabels(words: words, segments: diarizationSegments),
+            knownSpeakers: knownSpeakers
+        )
 
         return Transcript(
             text: phraseTitles.joined(separator: ". "),
@@ -394,6 +402,40 @@ public struct TranscriptionService: Sendable {
                 text: word.text,
                 speaker: matched?.speakerId ?? "Speaker A"
             )
+        }
+    }
+
+    private func mapKnownSpeakerNames(words: [TranscriptWord], knownSpeakers: [String]) -> [TranscriptWord] {
+        let normalized = knownSpeakers
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !normalized.isEmpty else {
+            return words
+        }
+
+        var discovered: [String] = []
+        for word in words {
+            guard let speaker = word.speaker, !speaker.isEmpty else { continue }
+            if !discovered.contains(speaker) {
+                discovered.append(speaker)
+            }
+        }
+        guard !discovered.isEmpty else {
+            return words
+        }
+
+        var mapping: [String: String] = [:]
+        for (index, speakerId) in discovered.enumerated() {
+            if index < normalized.count {
+                mapping[speakerId] = normalized[index]
+            }
+        }
+
+        return words.map { word in
+            guard let speaker = word.speaker, let mapped = mapping[speaker] else {
+                return word
+            }
+            return TranscriptWord(start: word.start, end: word.end, text: word.text, speaker: mapped)
         }
     }
 }

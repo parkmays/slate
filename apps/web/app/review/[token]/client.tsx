@@ -21,6 +21,8 @@ import { TranscriptPanel } from '@/components/TranscriptPanel'
 import { ClipContextPanel } from '@/components/ClipContextPanel'
 import { ReviewPresenceBar } from '@/components/ReviewPresenceBar'
 import { ReviewOpsPanel } from '@/components/ReviewOpsPanel'
+import { SpatialAnnotationOverlay } from '@/components/SpatialAnnotationOverlay'
+import { CastCharactersPanel } from '@/components/CastCharactersPanel'
 import { clipLabel } from '@/lib/review-insights'
 import {
   type AnnotationType,
@@ -33,6 +35,7 @@ import {
   type ReviewProjectData,
   type ReviewShareLink,
   type ReviewStatus,
+  type SpatialAnnotationPayload,
 } from '@/lib/review-types'
 import { secondsToTimecode, timecodeToSeconds } from '@/lib/timecode'
 import { cn } from '@/lib/utils'
@@ -141,6 +144,11 @@ function VideoPlayer({
   onTimeUpdate,
   seekTo,
   timecodeLabel,
+  annotations = [],
+  onCreateSpatialAnnotation,
+  onPlaybackEvent,
+  showShortcutOverlay = false,
+  prefetchedStream,
   playerId = 'primary',
   muted = false,
 }: {
@@ -151,6 +159,11 @@ function VideoPlayer({
   seekTo?: number | null
   /** When set, drives the burn-in overlay (keeps display in sync with parent playback state). */
   timecodeLabel?: string
+  annotations?: ReviewAnnotation[]
+  onCreateSpatialAnnotation?: (payload: SpatialAnnotationPayload) => void
+  onPlaybackEvent?: (payload: { kind: 'play' | 'pause' | 'seek'; currentTime: number; isPlaying: boolean }) => void
+  showShortcutOverlay?: boolean
+  prefetchedStream?: { signedUrl: string; thumbnailUrl?: string | null } | null
   playerId?: 'primary' | 'compare'
   muted?: boolean
 }) {
@@ -165,6 +178,12 @@ function VideoPlayer({
     let isActive = true
 
     async function loadStream() {
+      if (prefetchedStream?.signedUrl) {
+        setSignedUrl(prefetchedStream.signedUrl)
+        setThumbnailUrl(prefetchedStream.thumbnailUrl ?? null)
+        setLoading(false)
+        return
+      }
       setLoading(true)
       setError(null)
       setSignedUrl(null)
@@ -209,7 +228,7 @@ function VideoPlayer({
     return () => {
       isActive = false
     }
-  }, [clipId, token])
+  }, [clipId, token, prefetchedStream])
 
   useEffect(() => {
     let isActive = true
@@ -302,11 +321,40 @@ function VideoPlayer({
         preload="metadata"
         poster={thumbnailUrl ?? undefined}
         onTimeUpdate={(event) => onTimeUpdate(event.currentTarget.currentTime)}
+        onPlay={(event) => onPlaybackEvent?.({
+          kind: 'play',
+          currentTime: event.currentTarget.currentTime,
+          isPlaying: true,
+        })}
+        onPause={(event) => onPlaybackEvent?.({
+          kind: 'pause',
+          currentTime: event.currentTarget.currentTime,
+          isPlaying: false,
+        })}
+        onSeeked={(event) => onPlaybackEvent?.({
+          kind: 'seek',
+          currentTime: event.currentTarget.currentTime,
+          isPlaying: !event.currentTarget.paused,
+        })}
       />
+
+      {playerId === 'primary' && onCreateSpatialAnnotation ? (
+        <SpatialAnnotationOverlay
+          videoRef={videoRef}
+          annotations={annotations}
+          onSave={onCreateSpatialAnnotation}
+          disabled={false}
+        />
+      ) : null}
 
       <div className="pointer-events-none absolute bottom-12 right-3 rounded bg-black/70 px-2 py-1 text-xs font-mono text-white">
         {timecodeLabel ?? secondsToTimecode(videoRef.current?.currentTime ?? 0, fps)}
       </div>
+      {showShortcutOverlay ? (
+        <div className="pointer-events-none absolute bottom-3 left-3 rounded bg-black/70 px-2 py-1 text-[11px] text-zinc-200">
+          J / K / L: -10s · Play/Pause · +10s
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -517,14 +565,30 @@ export default function ReviewClient({
   const [annotationError, setAnnotationError] = useState<string | null>(null)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
   const [alternateMessage, setAlternateMessage] = useState<string | null>(null)
-  const [inspectorTab, setInspectorTab] = useState<'notes' | 'transcript' | 'ai' | 'context' | 'ops'>('notes')
+  const [inspectorTab, setInspectorTab] = useState<'notes' | 'transcript' | 'ai' | 'cast' | 'context' | 'ops'>('notes')
   const [realtimeStatus, setRealtimeStatus] = useState<string | null>(null)
   const [activeSidebarTab, setActiveSidebarTab] = useState<'clips' | 'assembly'>('clips')
   const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set())
   const [presence, setPresence] = useState<Record<string, ReviewPresenceUser>>({})
+  const [showSearchPalette, setShowSearchPalette] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Array<{
+    id: string
+    clipId: string | null
+    sourceType: string
+    sourceId: string
+    timeOffsetSeconds: number | null
+    body: string
+  }>>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [prefetchedStreams, setPrefetchedStreams] = useState<Record<string, { signedUrl: string; thumbnailUrl?: string | null }>>({})
+  const [watchPartyHostId, setWatchPartyHostId] = useState<string | null>(null)
+  const [watchPartyEnabled, setWatchPartyEnabled] = useState(true)
   const viewerIdRef = useRef(`reviewer-${crypto.randomUUID()}`)
   const viewerNameRef = useRef(`Reviewer ${shareLink.token.slice(0, 4)}`)
   const deepLinkAppliedRef = useRef(false)
+  const activeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const suppressPlaybackBroadcastRef = useRef(false)
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null
   const compareClip = useMemo(() => {
@@ -543,6 +607,87 @@ export default function ReviewClient({
       .sort((left, right) => left.name.localeCompare(right.name)),
     [presence]
   )
+
+  useEffect(() => {
+    if (!selectedClip) {
+      return
+    }
+    const selectedIndex = clips.findIndex((clip) => clip.id === selectedClip.id)
+    if (selectedIndex < 0 || selectedIndex >= clips.length - 1) {
+      return
+    }
+    const nextClip = clips[selectedIndex + 1]
+    if (!nextClip || prefetchedStreams[nextClip.id]) {
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch('/api/proxy-url', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Share-Token': token,
+          },
+          body: JSON.stringify({ clipId: nextClip.id }),
+        })
+        const payload = await response.json()
+        if (!response.ok || !payload?.signedUrl || cancelled) {
+          return
+        }
+        setPrefetchedStreams((previous) => ({
+          ...previous,
+          [nextClip.id]: {
+            signedUrl: payload.signedUrl as string,
+            thumbnailUrl: (payload.thumbnailUrl as string | null) ?? null,
+          },
+        }))
+      } catch {
+        // Best effort prefetch.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [clips, prefetchedStreams, selectedClip, token])
+
+  useEffect(() => {
+    if (!showSearchPalette) {
+      return
+    }
+    const query = searchQuery.trim()
+    if (query.length < 2) {
+      setSearchResults([])
+      return
+    }
+    let cancelled = false
+    const timeout = window.setTimeout(async () => {
+      setIsSearching(true)
+      try {
+        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&shareToken=${encodeURIComponent(token)}`, {
+          headers: {
+            'X-Share-Token': token,
+          },
+        })
+        const payload = await response.json()
+        if (!cancelled) {
+          setSearchResults(payload.results ?? [])
+        }
+      } catch {
+        if (!cancelled) {
+          setSearchResults([])
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSearching(false)
+        }
+      }
+    }, 180)
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+    }
+  }, [searchQuery, showSearchPalette, token])
 
   useEffect(() => {
     if (!selectedClipId) {
@@ -653,9 +798,45 @@ export default function ReviewClient({
           },
         }))
       })
+      .on('broadcast', { event: 'watch_party_state' }, ({ payload }) => {
+        if (!payload || typeof payload !== 'object') {
+          return
+        }
+        const hostId = typeof payload.hostId === 'string' ? payload.hostId : null
+        const viewerId = typeof payload.viewerId === 'string' ? payload.viewerId : null
+        const currentTime = typeof payload.currentTime === 'number' ? payload.currentTime : null
+        const shouldPlay = Boolean(payload.isPlaying)
+        if (hostId) {
+          setWatchPartyHostId(hostId)
+        }
+        if (!watchPartyEnabled || !hostId || (watchPartyHostId != null && hostId !== watchPartyHostId)) {
+          return
+        }
+        if (viewerId === viewerIdRef.current || currentTime == null) {
+          return
+        }
+        const video = primaryVideoElement()
+        if (!video) {
+          return
+        }
+        suppressPlaybackBroadcastRef.current = true
+        if (Math.abs(video.currentTime - currentTime) > 0.3) {
+          video.currentTime = currentTime
+        }
+        if (shouldPlay && video.paused) {
+          void video.play().catch(() => {})
+        } else if (!shouldPlay && !video.paused) {
+          video.pause()
+        }
+        window.setTimeout(() => {
+          suppressPlaybackBroadcastRef.current = false
+        }, 100)
+      })
       .subscribe((status) => {
         setRealtimeStatus(status)
       })
+
+    activeChannelRef.current = channel
 
     const sendPresence = () => channel.send({
       type: 'broadcast',
@@ -677,9 +858,10 @@ export default function ReviewClient({
  
     return () => {
       clearInterval(presenceInterval)
+      activeChannelRef.current = null
       void supabase.removeAllChannels()
     }
-  }, [selectedClipId, supabase])
+  }, [selectedClipId, supabase, watchPartyEnabled, watchPartyHostId])
 
   const selectClip = useCallback((clipId: string, options?: { seekSeconds?: number | null }) => {
     startTransition(() => {
@@ -735,6 +917,33 @@ export default function ReviewClient({
     setSeekTo(seconds)
   }, [])
 
+  const handlePlaybackEvent = useCallback((payload: { kind: 'play' | 'pause' | 'seek'; currentTime: number; isPlaying: boolean }) => {
+    if (!watchPartyEnabled || suppressPlaybackBroadcastRef.current) {
+      return
+    }
+    const hostId = watchPartyHostId ?? viewerIdRef.current
+    if (hostId !== viewerIdRef.current) {
+      return
+    }
+    setWatchPartyHostId(hostId)
+    const channel = activeChannelRef.current
+    if (!channel) {
+      return
+    }
+    void channel.send({
+      type: 'broadcast',
+      event: 'watch_party_state',
+      payload: {
+        hostId,
+        viewerId: viewerIdRef.current,
+        kind: payload.kind,
+        currentTime: payload.currentTime,
+        isPlaying: payload.isPlaying,
+        sentAt: new Date().toISOString(),
+      },
+    })
+  }, [watchPartyEnabled, watchPartyHostId])
+
   const handleSelectAnnotation = useCallback((timecodeIn: string) => {
     if (!selectedClip) {
       return
@@ -743,8 +952,13 @@ export default function ReviewClient({
     handleSeek(timecodeToSeconds(timecodeIn, selectedClip.sourceFps))
   }, [handleSeek, selectedClip])
 
-  const handleAddAnnotation = useCallback(async (type: AnnotationType, body: string, voiceUrl?: string | null) => {
-    if (!selectedClip) {
+  const handleAddAnnotation = useCallback(async (
+    type: AnnotationType,
+    body: string,
+    voiceUrl?: string | null,
+    spatialData?: SpatialAnnotationPayload | null
+  ) => {
+    if (!selectedClip || !shareLink.permissions.canComment) {
       return
     }
 
@@ -762,6 +976,7 @@ export default function ReviewClient({
       body,
       type,
       voiceUrl: voiceUrl ?? null,
+      spatialData: spatialData ?? null,
       createdAt: new Date().toISOString(),
       resolvedAt: null,
       isResolved: false,
@@ -788,6 +1003,7 @@ export default function ReviewClient({
           body,
           type,
           voiceUrl: voiceUrl ?? null,
+          spatialData: spatialData ?? null,
           shareToken: token,
         }),
       })
@@ -819,10 +1035,10 @@ export default function ReviewClient({
     } finally {
       setIsPostingAnnotation(false)
     }
-  }, [currentTime, currentTimecode, selectedClip, token])
+  }, [currentTime, currentTimecode, selectedClip, shareLink.permissions.canComment, token])
 
   const handleReply = useCallback(async (annotationId: string, body: string) => {
-    if (!selectedClip) {
+    if (!selectedClip || !shareLink.permissions.canComment) {
       return
     }
 
@@ -880,10 +1096,10 @@ export default function ReviewClient({
       )))
       setAnnotationError(error instanceof Error ? error.message : 'Failed to add reply')
     }
-  }, [selectedClip, token])
+  }, [selectedClip, shareLink.permissions.canComment, token])
 
   const handleToggleResolved = useCallback(async (annotationId: string, nextResolved: boolean) => {
-    if (!selectedClip) {
+    if (!selectedClip || shareLink.role !== 'editor') {
       return
     }
 
@@ -941,7 +1157,7 @@ export default function ReviewClient({
       )))
       setAnnotationError(error instanceof Error ? error.message : 'Failed to update annotation')
     }
-  }, [selectedClip, token])
+  }, [selectedClip, shareLink.role, token])
 
   const handleBatchStatusChange = useCallback(async (reviewStatus: ReviewStatus) => {
     const clipsToUpdate = Array.from(selectedClipIds)
@@ -1073,6 +1289,12 @@ export default function ReviewClient({
         return
       }
 
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setShowSearchPalette((value) => !value)
+        return
+      }
+
       if (event.key === 'j') {
         event.preventDefault()
         const video = primaryVideoElement()
@@ -1146,6 +1368,9 @@ export default function ReviewClient({
       if (event.key.toLowerCase() === 'i') {
         setInspectorTab('ai')
       }
+      if (event.key.toLowerCase() === 'g') {
+        setInspectorTab('cast')
+      }
       if (event.key.toLowerCase() === 'm') {
         setInspectorTab('context')
       }
@@ -1200,7 +1425,7 @@ export default function ReviewClient({
   const showRealtimeBanner = realtimeStatus != null && realtimeStatus !== 'SUBSCRIBED'
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100">
+    <div className="relative flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100">
       <ReviewHeader
         projectName={shareLink.project.name}
         projectMode={shareLink.project.mode}
@@ -1288,6 +1513,15 @@ export default function ReviewClient({
                       onTimeUpdate={setCurrentTime}
                       seekTo={seekTo}
                       timecodeLabel={currentTimecode}
+                      annotations={selectedClip.annotations}
+                      onCreateSpatialAnnotation={shareLink.permissions.canComment
+                        ? ((spatialData) => {
+                            void handleAddAnnotation('text', '', null, spatialData)
+                          })
+                        : undefined}
+                      onPlaybackEvent={handlePlaybackEvent}
+                      showShortcutOverlay
+                      prefetchedStream={prefetchedStreams[selectedClip.id] ?? null}
                       playerId="primary"
                     />
                   </div>
@@ -1307,6 +1541,8 @@ export default function ReviewClient({
                       onTimeUpdate={() => {}}
                       seekTo={seekTo}
                       timecodeLabel={currentTimecode}
+                      onPlaybackEvent={() => {}}
+                      prefetchedStream={prefetchedStreams[compareClip.id] ?? null}
                       playerId="compare"
                       muted
                     />
@@ -1320,6 +1556,15 @@ export default function ReviewClient({
                   onTimeUpdate={setCurrentTime}
                   seekTo={seekTo}
                   timecodeLabel={currentTimecode}
+                  annotations={selectedClip.annotations}
+                  onCreateSpatialAnnotation={shareLink.permissions.canComment
+                    ? ((spatialData) => {
+                        void handleAddAnnotation('text', '', null, spatialData)
+                      })
+                    : undefined}
+                  onPlaybackEvent={handlePlaybackEvent}
+                  showShortcutOverlay
+                  prefetchedStream={prefetchedStreams[selectedClip.id] ?? null}
                   playerId="primary"
                 />
               )}
@@ -1350,6 +1595,54 @@ export default function ReviewClient({
                 ) : null}
 
                 <ReviewPresenceBar viewers={activePresence} />
+
+                <section className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs text-zinc-400">
+                      Watch party host:{' '}
+                      <span className="font-medium text-zinc-200">
+                        {watchPartyHostId === viewerIdRef.current
+                          ? 'You'
+                          : (watchPartyHostId ? 'Remote reviewer' : 'None')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setWatchPartyEnabled((v) => !v)}
+                        className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
+                      >
+                        {watchPartyEnabled ? 'Following host' : 'Local playback'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const hostId = viewerIdRef.current
+                          setWatchPartyHostId(hostId)
+                          const video = primaryVideoElement()
+                          const channel = activeChannelRef.current
+                          if (video && channel) {
+                            void channel.send({
+                              type: 'broadcast',
+                              event: 'watch_party_state',
+                              payload: {
+                                hostId,
+                                viewerId: viewerIdRef.current,
+                                kind: 'seek',
+                                currentTime: video.currentTime,
+                                isPlaying: !video.paused,
+                                sentAt: new Date().toISOString(),
+                              },
+                            })
+                          }
+                        }}
+                        className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
+                      >
+                        Take host
+                      </button>
+                    </div>
+                  </div>
+                </section>
 
                 <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
                   <div className="flex items-start justify-between gap-3">
@@ -1393,6 +1686,7 @@ export default function ReviewClient({
                     ['notes', 'Notes'],
                     ['transcript', 'Transcript'],
                     ['ai', 'AI Scores'],
+                    ['cast', 'Cast'],
                     ['context', 'Context'],
                     ['ops', 'Ops'],
                   ] as const).map(([value, label]) => (
@@ -1419,9 +1713,10 @@ export default function ReviewClient({
                       currentTimecode={currentTimecode}
                       annotationSortFps={selectedClip.sourceFps}
                       permissions={{ canComment: shareLink.permissions.canComment }}
+                      role={shareLink.role}
                       onAddAnnotation={handleAddAnnotation}
                       onReply={handleReply}
-                      onToggleResolved={handleToggleResolved}
+                      onToggleResolved={shareLink.role === 'editor' ? handleToggleResolved : undefined}
                       onSelectAnnotation={handleSelectAnnotation}
                       onSelectAnnotationId={setSelectedAnnotationId}
                       selectedAnnotationId={selectedAnnotationId}
@@ -1451,10 +1746,16 @@ export default function ReviewClient({
                   <ClipContextPanel clip={selectedClip} />
                 ) : null}
 
+                {inspectorTab === 'cast' ? (
+                  <CastCharactersPanel token={token} clipId={selectedClip.id} />
+                ) : null}
+
                 {inspectorTab === 'ops' ? (
                   <ReviewOpsPanel
                     clips={clips}
                     selectedClipId={selectedClip.id}
+                    accessRole={shareLink.role}
+                    expiresAt={shareLink.expires_at}
                     onSelectClip={selectClip}
                     onCompareClip={handleCompareClip}
                   />
@@ -1468,6 +1769,60 @@ export default function ReviewClient({
           </div>
         )}
       </div>
+      {showSearchPalette ? (
+        <div className="absolute inset-0 z-50 flex items-start justify-center bg-black/50 p-6">
+          <div className="w-full max-w-2xl rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-xl">
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                type="text"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search dialogue, annotations, and tags…"
+                className="w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+              />
+              <button
+                type="button"
+                className="rounded border border-zinc-700 px-2 py-2 text-xs text-zinc-200 hover:bg-zinc-900"
+                onClick={() => setShowSearchPalette(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-3 max-h-[50vh] overflow-auto">
+              {isSearching ? (
+                <div className="px-2 py-4 text-sm text-zinc-500">Searching…</div>
+              ) : searchResults.length === 0 ? (
+                <div className="px-2 py-4 text-sm text-zinc-500">No results yet.</div>
+              ) : (
+                <div className="space-y-2">
+                  {searchResults.map((result) => (
+                    <button
+                      key={result.id}
+                      type="button"
+                      className="w-full rounded border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-left hover:border-zinc-700"
+                      onClick={() => {
+                        if (result.clipId) {
+                          selectClip(result.clipId, {
+                            seekSeconds: result.timeOffsetSeconds ?? 0,
+                          })
+                        }
+                        setShowSearchPalette(false)
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
+                        <span>{result.sourceType}</span>
+                        <span>{typeof result.timeOffsetSeconds === 'number' ? `${result.timeOffsetSeconds.toFixed(2)}s` : ''}</span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-sm text-zinc-100">{result.body}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

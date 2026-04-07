@@ -62,6 +62,18 @@ public struct R2Credentials: Sendable {
 public actor R2Uploader {
     private let region = "auto"
     private let service = "s3"
+    private let multipartThresholdBytes = 16 * 1024 * 1024
+    private let multipartChunkSizeBytes = 8 * 1024 * 1024
+    private let stateDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("slate-r2-upload-state", isDirectory: true)
+
+    private struct MultipartUploadState: Codable, Sendable {
+        var uploadId: String
+        var key: String
+        var fileSize: Int64
+        var fileModifiedAt: TimeInterval
+        var contentType: String
+        var completedParts: [Int: String]
+    }
 
     public init() {}
 
@@ -73,18 +85,39 @@ public actor R2Uploader {
     }
 
     /// PUT object to R2 with AWS SigV4; returns the public URL for `key`.
-    public func upload(localURL: URL, r2Key: String, contentType: String) async throws -> String {
+    public func upload(
+        localURL: URL,
+        r2Key: String,
+        contentType: String,
+        throttleBytesPerSecond: Int? = nil
+    ) async throws -> String {
         guard let credentials = R2Credentials.loadFromKeychain() else {
             throw R2UploaderError.missingCredentials
         }
-        let body = try Data(contentsOf: localURL)
+        let attributes = try FileManager.default.attributesOfItem(atPath: localURL.path)
+        let fileSize = (attributes[.size] as? Int64) ?? 0
+        let fileModifiedAt = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let publicBase = credentials.publicBaseURL
-        try await uploadWithRetry(
-            credentials: credentials,
-            body: body,
-            r2Key: r2Key,
-            contentType: contentType
-        )
+
+        if fileSize >= Int64(multipartThresholdBytes) {
+            try await multipartUpload(
+                credentials: credentials,
+                localURL: localURL,
+                fileSize: fileSize,
+                fileModifiedAt: fileModifiedAt,
+                r2Key: r2Key,
+                contentType: contentType,
+                throttleBytesPerSecond: throttleBytesPerSecond
+            )
+        } else {
+            let body = try Data(contentsOf: localURL)
+            try await uploadWithRetry(
+                credentials: credentials,
+                body: body,
+                r2Key: r2Key,
+                contentType: contentType
+            )
+        }
         return publicObjectURL(baseURL: publicBase, key: r2Key)
     }
 
@@ -139,14 +172,213 @@ public actor R2Uploader {
         throw lastError
     }
 
+    private func multipartUpload(
+        credentials: R2Credentials,
+        localURL: URL,
+        fileSize: Int64,
+        fileModifiedAt: TimeInterval,
+        r2Key: String,
+        contentType: String,
+        throttleBytesPerSecond: Int?
+    ) async throws {
+        try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+        let stateURL = stateURLForUpload(fileURL: localURL, key: r2Key)
+
+        var state = try loadMultipartState(from: stateURL)
+        if let existing = state,
+           (existing.fileSize != fileSize || existing.fileModifiedAt != fileModifiedAt || existing.contentType != contentType || existing.key != r2Key) {
+            state = nil
+            try? FileManager.default.removeItem(at: stateURL)
+        }
+
+        if state == nil {
+            let uploadId = try await initiateMultipartUpload(
+                credentials: credentials,
+                r2Key: r2Key,
+                contentType: contentType
+            )
+            state = MultipartUploadState(
+                uploadId: uploadId,
+                key: r2Key,
+                fileSize: fileSize,
+                fileModifiedAt: fileModifiedAt,
+                contentType: contentType,
+                completedParts: [:]
+            )
+            try saveMultipartState(state!, to: stateURL)
+        }
+
+        guard var activeState = state else {
+            throw R2UploaderError.uploadFailed("Missing multipart upload state")
+        }
+
+        let totalParts = max(1, Int((fileSize + Int64(multipartChunkSizeBytes) - 1) / Int64(multipartChunkSizeBytes)))
+        let handle = try FileHandle(forReadingFrom: localURL)
+        defer { try? handle.close() }
+
+        for partNumber in 1...totalParts {
+            if activeState.completedParts[partNumber] != nil {
+                continue
+            }
+            let offset = Int64(partNumber - 1) * Int64(multipartChunkSizeBytes)
+            let remaining = fileSize - offset
+            let bytesToRead = Int(min(Int64(multipartChunkSizeBytes), max(remaining, 0)))
+            try handle.seek(toOffset: UInt64(offset))
+            let chunk = try handle.read(upToCount: bytesToRead) ?? Data()
+            guard !chunk.isEmpty else {
+                throw R2UploaderError.uploadFailed("Failed to read upload chunk \(partNumber)")
+            }
+
+            let etag = try await uploadPartWithRetry(
+                credentials: credentials,
+                r2Key: r2Key,
+                contentType: contentType,
+                uploadId: activeState.uploadId,
+                partNumber: partNumber,
+                body: chunk
+            )
+
+            activeState.completedParts[partNumber] = etag
+            try saveMultipartState(activeState, to: stateURL)
+            try await throttleAfterUpload(byteCount: chunk.count, throttleOverride: throttleBytesPerSecond)
+        }
+
+        try await completeMultipartUpload(
+            credentials: credentials,
+            r2Key: r2Key,
+            uploadId: activeState.uploadId,
+            parts: activeState.completedParts
+        )
+        try? FileManager.default.removeItem(at: stateURL)
+    }
+
+    private func uploadPartWithRetry(
+        credentials: R2Credentials,
+        r2Key: String,
+        contentType: String,
+        uploadId: String,
+        partNumber: Int,
+        body: Data
+    ) async throws -> String {
+        var lastError: Error = R2UploaderError.uploadFailed("Unknown multipart error")
+        var delayNanoseconds: UInt64 = 1_000_000_000
+
+        for attempt in 0..<8 {
+            do {
+                return try await uploadPart(
+                    credentials: credentials,
+                    r2Key: r2Key,
+                    contentType: contentType,
+                    uploadId: uploadId,
+                    partNumber: partNumber,
+                    body: body
+                )
+            } catch {
+                lastError = error
+                if attempt < 7 {
+                    try await Task.sleep(nanoseconds: delayNanoseconds)
+                    // If we're offline, back off more aggressively and keep state for seamless resume.
+                    if isConnectivityError(error) {
+                        delayNanoseconds = min(delayNanoseconds * 2, 30_000_000_000)
+                    } else {
+                        delayNanoseconds = min(delayNanoseconds * 2, 8_000_000_000)
+                    }
+                }
+            }
+        }
+        throw lastError
+    }
+
+    private func uploadPart(
+        credentials: R2Credentials,
+        r2Key: String,
+        contentType: String,
+        uploadId: String,
+        partNumber: Int,
+        body: Data
+    ) async throws -> String {
+        let response = try await performSignedRequest(
+            credentials: credentials,
+            method: "PUT",
+            r2Key: r2Key,
+            query: [
+                URLQueryItem(name: "partNumber", value: "\(partNumber)"),
+                URLQueryItem(name: "uploadId", value: uploadId)
+            ],
+            contentType: contentType,
+            body: body
+        )
+        return normalizedETag(response.http.value(forHTTPHeaderField: "ETag"))
+    }
+
+    private func initiateMultipartUpload(
+        credentials: R2Credentials,
+        r2Key: String,
+        contentType: String
+    ) async throws -> String {
+        let response = try await performSignedRequest(
+            credentials: credentials,
+            method: "POST",
+            r2Key: r2Key,
+            query: [URLQueryItem(name: "uploads", value: "")],
+            contentType: contentType,
+            body: Data()
+        )
+        guard let uploadId = extractXMLTag("UploadId", from: response.data) else {
+            throw R2UploaderError.uploadFailed("Multipart init response missing UploadId")
+        }
+        return uploadId
+    }
+
+    private func completeMultipartUpload(
+        credentials: R2Credentials,
+        r2Key: String,
+        uploadId: String,
+        parts: [Int: String]
+    ) async throws {
+        let xmlParts = parts.keys.sorted().compactMap { partNumber -> String? in
+            guard let etag = parts[partNumber] else { return nil }
+            return "<Part><PartNumber>\(partNumber)</PartNumber><ETag>\"\(etag)\"</ETag></Part>"
+        }.joined()
+        let body = Data("<CompleteMultipartUpload>\(xmlParts)</CompleteMultipartUpload>".utf8)
+        _ = try await performSignedRequest(
+            credentials: credentials,
+            method: "POST",
+            r2Key: r2Key,
+            query: [URLQueryItem(name: "uploadId", value: uploadId)],
+            contentType: "application/xml",
+            body: body
+        )
+    }
+
     private func performPut(
         credentials: R2Credentials,
         body: Data,
         r2Key: String,
         contentType: String
     ) async throws {
+        _ = try await performSignedRequest(
+            credentials: credentials,
+            method: "PUT",
+            r2Key: r2Key,
+            query: [],
+            contentType: contentType,
+            body: body
+        )
+    }
+
+    private func performSignedRequest(
+        credentials: R2Credentials,
+        method: String,
+        r2Key: String,
+        query: [URLQueryItem],
+        contentType: String,
+        body: Data
+    ) async throws -> (data: Data, http: HTTPURLResponse) {
         let host = "\(credentials.accountId).r2.cloudflarestorage.com"
         let canonicalURI = pathStyleURI(bucket: credentials.bucketName, key: r2Key)
+        let canonicalQuery = canonicalQueryString(query)
+        let requestQuery = requestQueryString(query)
         let payloadHash = sha256Hex(body)
 
         let now = Date()
@@ -172,9 +404,9 @@ public actor R2Uploader {
         ].joined(separator: "\n") + "\n"
 
         let canonicalRequest = [
-            "PUT",
+            method,
             canonicalURI,
-            "",
+            canonicalQuery,
             canonicalHeaders,
             signedHeaders,
             payloadHash
@@ -197,11 +429,12 @@ public actor R2Uploader {
         let authorization =
             "AWS4-HMAC-SHA256 Credential=\(credentials.accessKeyId)/\(credentialScope), SignedHeaders=\(signedHeaders), Signature=\(signature)"
 
-        guard let url = URL(string: "https://\(host)\(canonicalURI)") else {
+        let querySuffix = requestQuery.isEmpty ? "" : "?\(requestQuery)"
+        guard let url = URL(string: "https://\(host)\(canonicalURI)\(querySuffix)") else {
             throw R2UploaderError.uploadFailed("Invalid R2 URL")
         }
         var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
+        request.httpMethod = method
         request.httpBody = body
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue(contentLength, forHTTPHeaderField: "Content-Length")
@@ -210,13 +443,38 @@ public actor R2Uploader {
         request.setValue(amzDate, forHTTPHeaderField: "x-amz-date")
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (responseData, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw R2UploaderError.uploadFailed("No HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
             throw R2UploaderError.uploadFailed("HTTP \(http.statusCode)")
         }
+        return (responseData, http)
+    }
+
+    private func canonicalQueryString(_ query: [URLQueryItem]) -> String {
+        guard !query.isEmpty else { return "" }
+        let encoded = query.map { (item: URLQueryItem) -> (String, String) in
+            let name = awsEncodePathSegment(item.name)
+            let value = awsEncodePathSegment(item.value ?? "")
+            return (name, value)
+        }.sorted { lhs, rhs in
+            if lhs.0 == rhs.0 {
+                return lhs.1 < rhs.1
+            }
+            return lhs.0 < rhs.0
+        }
+        return encoded.map { "\($0.0)=\($0.1)" }.joined(separator: "&")
+    }
+
+    private func requestQueryString(_ query: [URLQueryItem]) -> String {
+        guard !query.isEmpty else { return "" }
+        return query.map { item in
+            let name = awsEncodePathSegment(item.name)
+            let value = awsEncodePathSegment(item.value ?? "")
+            return "\(name)=\(value)"
+        }.joined(separator: "&")
     }
 
     private func pathStyleURI(bucket: String, key: String) -> String {
@@ -269,6 +527,71 @@ public actor R2Uploader {
         guard CGImageDestinationFinalize(dest) else {
             throw R2UploaderError.thumbnailFailed("Could not finalize JPEG")
         }
+    }
+
+    private func stateURLForUpload(fileURL: URL, key: String) -> URL {
+        let fingerprint = sha256Hex(Data("\(fileURL.path)::\(key)".utf8))
+        return stateDirectory.appendingPathComponent("\(fingerprint).json")
+    }
+
+    private func loadMultipartState(from url: URL) throws -> MultipartUploadState? {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(MultipartUploadState.self, from: data)
+    }
+
+    private func saveMultipartState(_ state: MultipartUploadState, to url: URL) throws {
+        let data = try JSONEncoder().encode(state)
+        try data.write(to: url, options: .atomic)
+    }
+
+    private func normalizedETag(_ raw: String?) -> String {
+        (raw ?? "").replacingOccurrences(of: "\"", with: "")
+    }
+
+    private func extractXMLTag(_ tag: String, from data: Data) -> String? {
+        guard let xml = String(data: data, encoding: .utf8) else { return nil }
+        let open = "<\(tag)>"
+        let close = "</\(tag)>"
+        guard let startRange = xml.range(of: open), let endRange = xml.range(of: close) else {
+            return nil
+        }
+        return String(xml[startRange.upperBound..<endRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func throttleAfterUpload(byteCount: Int, throttleOverride: Int?) async throws {
+        let bytesPerSecond = throttleOverride ?? uploadThrottleBytesPerSecond()
+        guard let bytesPerSecond, bytesPerSecond > 0 else {
+            return
+        }
+        let sleepSeconds = Double(byteCount) / Double(bytesPerSecond)
+        let nanos = UInt64(max(0, sleepSeconds) * 1_000_000_000)
+        if nanos > 0 {
+            try await Task.sleep(nanoseconds: nanos)
+        }
+    }
+
+    private func uploadThrottleBytesPerSecond() -> Int? {
+        let env = ProcessInfo.processInfo.environment["SLATE_UPLOAD_THROTTLE_BPS"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let env, let value = Int(env), value > 0 {
+            return value
+        }
+        let defaultsValue = UserDefaults.standard.integer(forKey: "SLATE.uploadThrottleBytesPerSecond")
+        return defaultsValue > 0 ? defaultsValue : nil
+    }
+
+    private func isConnectivityError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .timedOut:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 }
 

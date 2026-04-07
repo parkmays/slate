@@ -466,6 +466,18 @@ public struct CloudSyncSheet: View {
                     .foregroundColor(.secondary)
             }
 
+        case .amazonS3:
+            VStack(alignment: .leading, spacing: 6) {
+                Text("S3 Prefix Path")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                TextField("projects/slate-dailies", text: $remotePath)
+                    .textFieldStyle(.roundedBorder)
+                Text("Configure credentials via environment variables: SLATE_S3_ACCESS_KEY_ID, SLATE_S3_SECRET_ACCESS_KEY, SLATE_S3_BUCKET, and SLATE_S3_ENDPOINT.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
         case .frameIO:
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -565,6 +577,9 @@ public struct CloudSyncSheet: View {
 
         if provider == .dropbox, remotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             remotePath = "/Apps/SLATE/\(sanitizedProjectName)"
+        }
+        if provider == .amazonS3, remotePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            remotePath = "projects/\(sanitizedProjectName)"
         }
 
         if provider == .frameIO,
@@ -743,6 +758,14 @@ public struct CloudSyncSheet: View {
     }
 
     private func connectProvider() async {
+        if provider == .amazonS3 {
+            notice = CloudSyncNotice(
+                title: "S3 uses access keys",
+                message: "Set S3 environment variables and save a destination. OAuth is not required for S3.",
+                style: .success
+            )
+            return
+        }
         notice = nil
         saveProviderConfiguration()
 
@@ -768,6 +791,14 @@ public struct CloudSyncSheet: View {
     }
 
     private func disconnectProvider() {
+        if provider == .amazonS3 {
+            notice = CloudSyncNotice(
+                title: "S3 credentials are environment-managed",
+                message: "Unset your SLATE_S3_* environment variables to disconnect.",
+                style: .warning
+            )
+            return
+        }
         do {
             try cloudAuthManager.disconnect(provider: provider)
             notice = CloudSyncNotice(
@@ -785,11 +816,21 @@ public struct CloudSyncSheet: View {
     }
 
     private func isProviderReady(for provider: CloudSyncProvider) -> Bool {
-        cloudAuthManager.hasConnectedAccount(for: provider)
+        if provider == .amazonS3 {
+            let env = ProcessInfo.processInfo.environment
+            return (env["SLATE_S3_ACCESS_KEY_ID"]?.isEmpty == false)
+                && (env["SLATE_S3_SECRET_ACCESS_KEY"]?.isEmpty == false)
+                && (env["SLATE_S3_BUCKET"]?.isEmpty == false)
+                && (env["SLATE_S3_ENDPOINT"]?.isEmpty == false)
+        }
+        return cloudAuthManager.hasConnectedAccount(for: provider)
     }
 
     private func isOAuthConnected(for provider: CloudSyncProvider) -> Bool {
-        cloudAuthManager.account(for: provider) != nil
+        if provider == .amazonS3 {
+            return isProviderReady(for: provider)
+        }
+        return cloudAuthManager.account(for: provider) != nil
     }
 
     private func providerAccessLabel(for provider: CloudSyncProvider) -> String {
@@ -810,6 +851,8 @@ public struct CloudSyncSheet: View {
             return "OAuth Client ID"
         case .dropbox:
             return "App Key"
+        case .amazonS3:
+            return "Access Key ID"
         case .frameIO:
             return "Client ID"
         }
@@ -821,6 +864,8 @@ public struct CloudSyncSheet: View {
             return "Google desktop OAuth client ID"
         case .dropbox:
             return "Dropbox app key"
+        case .amazonS3:
+            return "AWS access key ID (or S3-compatible equivalent)"
         case .frameIO:
             return "Adobe Developer client ID"
         }
@@ -832,6 +877,8 @@ public struct CloudSyncSheet: View {
             return ""
         case .dropbox:
             return "Dropbox app secret"
+        case .amazonS3:
+            return "AWS secret access key"
         case .frameIO:
             return "Adobe Developer client secret"
         }
@@ -841,6 +888,8 @@ public struct CloudSyncSheet: View {
         switch provider {
         case .googleDrive:
             return false
+        case .amazonS3:
+            return true
         case .dropbox, .frameIO:
             return true
         }
@@ -852,6 +901,8 @@ public struct CloudSyncSheet: View {
             return "Google Drive uses a desktop OAuth client. The client ID can also come from SLATE_GOOGLE_DRIVE_CLIENT_ID if you prefer environment-based config."
         case .dropbox:
             return "Dropbox uses an app key and secret with offline access so SLATE can refresh tokens locally. Environment fallbacks: SLATE_DROPBOX_APP_KEY and SLATE_DROPBOX_APP_SECRET."
+        case .amazonS3:
+            return "S3 does not use OAuth in SLATE. Provide access key, secret key, bucket, and endpoint via SLATE_S3_ACCESS_KEY_ID, SLATE_S3_SECRET_ACCESS_KEY, SLATE_S3_BUCKET, and SLATE_S3_ENDPOINT."
         case .frameIO:
             return "Frame.io uses Adobe OAuth credentials and stores refresh tokens in the macOS keychain. Environment fallbacks: SLATE_FRAMEIO_CLIENT_ID and SLATE_FRAMEIO_CLIENT_SECRET."
         }
@@ -873,6 +924,8 @@ public struct CloudSyncSheet: View {
             remoteFolderId = ""
         case .dropbox:
             remotePath = "/Apps/SLATE/\(sanitizedProjectName)"
+        case .amazonS3:
+            remotePath = "projects/\(sanitizedProjectName)"
         case .frameIO:
             accountId = ""
             remoteFolderId = ""

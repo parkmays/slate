@@ -74,7 +74,12 @@ public actor ProxyGenerator {
     }
     
     /// Generate proxy for a clip
-    public func generateProxy(for clip: Clip, burnInConfig: BurnInConfig = BurnInConfig()) async throws {
+    public func generateProxy(
+        for clip: Clip,
+        burnInConfig: BurnInConfig = BurnInConfig(),
+        uploadThrottleBytesPerSecond: Int? = nil,
+        transcodeProfile: ProxyTranscodeProfile? = nil
+    ) async throws {
         // Skip if already processing
         if processingQueue[clip.id] != nil {
             return
@@ -82,14 +87,24 @@ public actor ProxyGenerator {
         
         let task = Task {
             defer { processingQueue.removeValue(forKey: clip.id) }
-            try await performProxyGeneration(clip: clip, burnInConfig: burnInConfig)
+            try await performProxyGeneration(
+                clip: clip,
+                burnInConfig: burnInConfig,
+                uploadThrottleBytesPerSecond: uploadThrottleBytesPerSecond,
+                transcodeProfile: transcodeProfile
+            )
         }
         
         processingQueue[clip.id] = task
         try await task.value
     }
     
-    private func performProxyGeneration(clip: Clip, burnInConfig: BurnInConfig) async throws {
+    private func performProxyGeneration(
+        clip: Clip,
+        burnInConfig: BurnInConfig,
+        uploadThrottleBytesPerSecond: Int?,
+        transcodeProfile: ProxyTranscodeProfile?
+    ) async throws {
         let sourceURL = URL(fileURLWithPath: clip.sourcePath)
         let proxyDir = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Movies/SLATE")
@@ -131,8 +146,10 @@ public actor ProxyGenerator {
             let displayHeight = Int(abs(transformedSize.height))
 
             // Ensure dimensions are even (required by H.264 encoder) and at least 640×360.
-            let proxyWidth  = max((displayWidth  / 4) & ~1, 640)
-            let proxyHeight = max((displayHeight / 4) & ~1, 360)
+            let profile = transcodeProfile ?? .slateDefault
+            let scaleDivisor = max(profile.scaleDivisor, 1)
+            let proxyWidth  = max((displayWidth  / scaleDivisor) & ~1, 640)
+            let proxyHeight = max((displayHeight / scaleDivisor) & ~1, 360)
             
             // Create reader
             let reader = try AVAssetReader(asset: asset)
@@ -175,7 +192,7 @@ public actor ProxyGenerator {
                 AVVideoWidthKey: proxyWidth,
                 AVVideoHeightKey: proxyHeight,
                 AVVideoCompressionPropertiesKey: [
-                    AVVideoAverageBitRateKey: 8_000_000, // 8 Mbps
+                    AVVideoAverageBitRateKey: profile.bitrateBps,
                     AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
                     AVVideoExpectedSourceFrameRateKey: clip.sourceFps,
                     AVVideoMaxKeyFrameIntervalKey: Int(clip.sourceFps * 2) // Every 2 seconds
@@ -350,7 +367,12 @@ public actor ProxyGenerator {
                 proxyColorSpace: proxyColorSpace
             )
 
-            await uploadProxyToR2(clip: clip, proxyURL: proxyURL, playlistURL: playlistURL)
+            await uploadProxyToR2(
+                clip: clip,
+                proxyURL: proxyURL,
+                playlistURL: playlistURL,
+                uploadThrottleBytesPerSecond: uploadThrottleBytesPerSecond
+            )
 
         } catch {
             // Update status to error
@@ -432,7 +454,12 @@ public actor ProxyGenerator {
     }
     
     /// Uploads proxy MP4, HLS playlist, and thumbnail to Cloudflare R2. Failures are logged; local `ready` proxy remains valid.
-    private func uploadProxyToR2(clip: Clip, proxyURL: URL, playlistURL: URL) async {
+    private func uploadProxyToR2(
+        clip: Clip,
+        proxyURL: URL,
+        playlistURL: URL,
+        uploadThrottleBytesPerSecond: Int?
+    ) async {
         guard R2Credentials.loadFromKeychain() != nil else {
             print("[ProxyGenerator] R2 Keychain credentials not found; skipping remote upload for \(clip.id)")
             return
@@ -452,12 +479,27 @@ public actor ProxyGenerator {
 
         let publicMP4: String
         do {
-            publicMP4 = try await r2Uploader.upload(localURL: proxyURL, r2Key: mp4Key, contentType: "video/mp4")
-            _ = try await r2Uploader.upload(localURL: playlistURL, r2Key: m3u8Key, contentType: "application/x-mpegURL")
+            publicMP4 = try await r2Uploader.upload(
+                localURL: proxyURL,
+                r2Key: mp4Key,
+                contentType: "video/mp4",
+                throttleBytesPerSecond: uploadThrottleBytesPerSecond
+            )
+            _ = try await r2Uploader.upload(
+                localURL: playlistURL,
+                r2Key: m3u8Key,
+                contentType: "application/x-mpegURL",
+                throttleBytesPerSecond: uploadThrottleBytesPerSecond
+            )
 
             let thumbURL = try await r2Uploader.generateThumbnail(proxyURL: proxyURL)
             defer { try? FileManager.default.removeItem(at: thumbURL) }
-            _ = try await r2Uploader.upload(localURL: thumbURL, r2Key: thumbKey, contentType: "image/jpeg")
+            _ = try await r2Uploader.upload(
+                localURL: thumbURL,
+                r2Key: thumbKey,
+                contentType: "image/jpeg",
+                throttleBytesPerSecond: uploadThrottleBytesPerSecond
+            )
         } catch {
             print("[ProxyGenerator] R2 upload failed for \(clip.id): \(error)")
             do {

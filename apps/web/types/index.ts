@@ -10,6 +10,7 @@ export type {
   ReviewProjectData,
   ReviewShareLink as ShareLink,
   ReviewStatus,
+  SpatialAnnotationPayload,
   ReviewTranscriptSegment,
 } from '@/lib/review-types'
 

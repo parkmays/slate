@@ -1,4 +1,5 @@
 import ExportWriters
+import CryptoKit
 import Foundation
 import GRDB
 import SwiftUI
@@ -8,6 +9,7 @@ import SLATESharedTypes
 public enum CloudSyncProvider: String, Codable, CaseIterable, Identifiable, Sendable {
     case googleDrive = "google_drive"
     case dropbox
+    case amazonS3 = "amazon_s3"
     case frameIO = "frame_io"
 
     public var id: String { rawValue }
@@ -18,6 +20,8 @@ public enum CloudSyncProvider: String, Codable, CaseIterable, Identifiable, Send
             return "Google Drive"
         case .dropbox:
             return "Dropbox"
+        case .amazonS3:
+            return "Amazon S3"
         case .frameIO:
             return "Frame.io"
         }
@@ -29,6 +33,8 @@ public enum CloudSyncProvider: String, Codable, CaseIterable, Identifiable, Send
             return "SLATE_GOOGLE_DRIVE_ACCESS_TOKEN"
         case .dropbox:
             return "SLATE_DROPBOX_ACCESS_TOKEN"
+        case .amazonS3:
+            return "SLATE_S3_ACCESS_KEY_ID"
         case .frameIO:
             return "SLATE_FRAMEIO_ACCESS_TOKEN"
         }
@@ -40,6 +46,8 @@ public enum CloudSyncProvider: String, Codable, CaseIterable, Identifiable, Send
             return "externaldrive.badge.icloud"
         case .dropbox:
             return "shippingbox"
+        case .amazonS3:
+            return "externaldrive.connected.to.line.below"
         case .frameIO:
             return "play.rectangle.on.rectangle"
         }
@@ -106,6 +114,10 @@ public struct CloudSyncDestinationConfiguration: Codable, Sendable, Equatable {
         case .dropbox:
             guard normalized.remotePath != nil else {
                 throw CloudSyncStoreError.invalidDestination("Dropbox destinations need a folder path like /Apps/SLATE.")
+            }
+        case .amazonS3:
+            guard normalized.remotePath != nil else {
+                throw CloudSyncStoreError.invalidDestination("S3 destinations need a prefix path (for example projects/slate).")
             }
         case .frameIO:
             guard normalized.accountId != nil, normalized.remoteFolderId != nil else {
@@ -825,6 +837,26 @@ public final class CloudSyncStore: ObservableObject {
         for destination: CloudSyncDestination,
         authManager: CloudAuthManager?
     ) async throws -> any CloudStorageProviderClient {
+        if destination.provider == .amazonS3 {
+            let accessKeyId = ProcessInfo.processInfo.environment["SLATE_S3_ACCESS_KEY_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let secretAccessKey = ProcessInfo.processInfo.environment["SLATE_S3_SECRET_ACCESS_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let bucket = ProcessInfo.processInfo.environment["SLATE_S3_BUCKET"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let endpoint = ProcessInfo.processInfo.environment["SLATE_S3_ENDPOINT"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let region = ProcessInfo.processInfo.environment["SLATE_S3_REGION"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "us-east-1"
+            guard !accessKeyId.isEmpty, !secretAccessKey.isEmpty, !bucket.isEmpty, !endpoint.isEmpty else {
+                throw CloudSyncStoreError.invalidDestination(
+                    "Set SLATE_S3_ACCESS_KEY_ID, SLATE_S3_SECRET_ACCESS_KEY, SLATE_S3_BUCKET, and SLATE_S3_ENDPOINT."
+                )
+            }
+            return S3CompatibleCloudClient(
+                accessKeyId: accessKeyId,
+                secretAccessKey: secretAccessKey,
+                bucket: bucket,
+                endpoint: endpoint,
+                region: region
+            )
+        }
+
         let token: String
         if let authManager {
             do {
@@ -848,6 +880,8 @@ public final class CloudSyncStore: ObservableObject {
             return GoogleDriveCloudClient(accessToken: token)
         case .dropbox:
             return DropboxCloudClient(accessToken: token)
+        case .amazonS3:
+            throw CloudSyncStoreError.invalidDestination("S3 client should be initialized via access-key credentials.")
         case .frameIO:
             return FrameIOCloudClient(accessToken: token)
         }
@@ -2009,6 +2043,228 @@ private struct DropboxCloudClient: CloudStorageProviderClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validateHTTPResponse(response, data: data, context: "Dropbox download")
         try data.write(to: localURL, options: .atomic)
+    }
+}
+
+private struct S3CompatibleCloudClient: CloudStorageProviderClient {
+    let accessKeyId: String
+    let secretAccessKey: String
+    let bucket: String
+    let endpoint: String
+    let region: String
+
+    func upload(
+        fileURL: URL,
+        remoteName: String,
+        destination: CloudSyncDestination
+    ) async throws -> ProviderUploadResult {
+        guard let prefix = destination.configuration.remotePath?.trimmingCharacters(in: .whitespacesAndNewlines), !prefix.isEmpty else {
+            throw CloudSyncStoreError.invalidDestination("S3 destinations need a remote path prefix.")
+        }
+        let objectKey = normalizedObjectKey(prefix: prefix, remoteName: remoteName)
+        let data = try Data(contentsOf: fileURL)
+        let mimeType = fileURL.detectedMimeType
+        _ = try await performSignedRequest(method: "PUT", objectKey: objectKey, query: [], body: data, contentType: mimeType)
+        let remoteURL = "\(trimmedEndpoint())/\(bucket)/\(objectKey)"
+        return ProviderUploadResult(
+            remoteIdentifier: objectKey,
+            remotePath: prefix,
+            remoteURL: remoteURL,
+            byteCount: Int64(data.count)
+        )
+    }
+
+    func listAssets(destination: CloudSyncDestination) async throws -> [CloudRemoteAsset] {
+        guard let prefix = destination.configuration.remotePath?.trimmingCharacters(in: .whitespacesAndNewlines), !prefix.isEmpty else {
+            return []
+        }
+        let (_, body) = try await performSignedRequest(
+            method: "GET",
+            objectKey: "",
+            query: [URLQueryItem(name: "list-type", value: "2"), URLQueryItem(name: "prefix", value: prefix)],
+            body: Data(),
+            contentType: "application/xml"
+        )
+        guard let xml = String(data: body, encoding: .utf8), !xml.isEmpty else {
+            return []
+        }
+        let keyRegex = try NSRegularExpression(pattern: "<Key>([^<]+)</Key>")
+        let sizeRegex = try NSRegularExpression(pattern: "<Size>([0-9]+)</Size>")
+        let nsXml = xml as NSString
+        let keyMatches = keyRegex.matches(in: xml, range: NSRange(location: 0, length: nsXml.length))
+        let sizeMatches = sizeRegex.matches(in: xml, range: NSRange(location: 0, length: nsXml.length))
+
+        var assets: [CloudRemoteAsset] = []
+        for (index, keyMatch) in keyMatches.enumerated() {
+            guard keyMatch.numberOfRanges > 1 else { continue }
+            let key = nsXml.substring(with: keyMatch.range(at: 1))
+            let size = (index < sizeMatches.count && sizeMatches[index].numberOfRanges > 1)
+                ? Int64(nsXml.substring(with: sizeMatches[index].range(at: 1))) ?? 0
+                : 0
+            assets.append(
+                CloudRemoteAsset(
+                    name: URL(fileURLWithPath: key).lastPathComponent,
+                    locator: .directURL(URL(string: "\(trimmedEndpoint())/\(bucket)/\(key)")!),
+                    remotePath: key,
+                    remoteURL: "\(trimmedEndpoint())/\(bucket)/\(key)",
+                    byteCount: size,
+                    modifiedAt: nil
+                )
+            )
+        }
+        return assets
+    }
+
+    func download(asset: CloudRemoteAsset, to localURL: URL) async throws {
+        switch asset.locator {
+        case .directURL(let url):
+            let (data, response) = try await URLSession.shared.data(from: url)
+            try validateHTTPResponse(response, data: data, context: "S3 download")
+            try data.write(to: localURL, options: .atomic)
+        default:
+            guard let key = asset.remotePath else {
+                throw CloudSyncStoreError.uploadFailed("S3 asset key is missing.")
+            }
+            let (_, data) = try await performSignedRequest(
+                method: "GET",
+                objectKey: key,
+                query: [],
+                body: Data(),
+                contentType: "application/octet-stream"
+            )
+            try data.write(to: localURL, options: .atomic)
+        }
+    }
+
+    private func performSignedRequest(
+        method: String,
+        objectKey: String,
+        query: [URLQueryItem],
+        body: Data,
+        contentType: String
+    ) async throws -> (HTTPURLResponse, Data) {
+        let host = URL(string: trimmedEndpoint())?.host ?? ""
+        let path = "/\(bucket)/\(objectKey.trimmingCharacters(in: CharacterSet(charactersIn: "/")))"
+        let payloadHash = sha256Hex(body)
+        let now = Date()
+        let amzDate = dateString(now, format: "yyyyMMdd'T'HHmmss'Z'")
+        let dateStamp = dateString(now, format: "yyyyMMdd")
+        let signedHeaders = "content-length;content-type;host;x-amz-content-sha256;x-amz-date"
+        let canonicalHeaders = [
+            "content-length:\(body.count)",
+            "content-type:\(contentType)",
+            "host:\(host)",
+            "x-amz-content-sha256:\(payloadHash)",
+            "x-amz-date:\(amzDate)",
+        ].joined(separator: "\n") + "\n"
+        let canonicalQuery = canonicalQueryString(query)
+        let canonicalRequest = [
+            method,
+            path,
+            canonicalQuery,
+            canonicalHeaders,
+            signedHeaders,
+            payloadHash,
+        ].joined(separator: "\n")
+        let scope = "\(dateStamp)/\(region)/s3/aws4_request"
+        let stringToSign = [
+            "AWS4-HMAC-SHA256",
+            amzDate,
+            scope,
+            sha256Hex(Data(canonicalRequest.utf8)),
+        ].joined(separator: "\n")
+        let signingKey = deriveSigningKey(secret: secretAccessKey, dateStamp: dateStamp, region: region, service: "s3")
+        let signature = hmacSHA256(key: signingKey, data: Data(stringToSign.utf8)).map { String(format: "%02x", $0) }.joined()
+        let authorization = "AWS4-HMAC-SHA256 Credential=\(accessKeyId)/\(scope), SignedHeaders=\(signedHeaders), Signature=\(signature)"
+        let queryString = canonicalQuery
+        let url = URL(string: "\(trimmedEndpoint())\(path)\(queryString.isEmpty ? "" : "?\(queryString)")")!
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
+        request.setValue(host, forHTTPHeaderField: "Host")
+        request.setValue(payloadHash, forHTTPHeaderField: "x-amz-content-sha256")
+        request.setValue(amzDate, forHTTPHeaderField: "x-amz-date")
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw CloudSyncStoreError.uploadFailed("S3 returned no HTTP response.")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw CloudSyncStoreError.uploadFailed("S3 request failed: \(body)")
+        }
+        return (http, data)
+    }
+
+    private func normalizedObjectKey(prefix: String, remoteName: String) -> String {
+        let left = prefix.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return "\(left)/\(remoteName)"
+    }
+
+    private func trimmedEndpoint() -> String {
+        endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private func dateString(_ date: Date, format: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = format
+        return formatter.string(from: date)
+    }
+
+    private func canonicalQueryString(_ query: [URLQueryItem]) -> String {
+        guard !query.isEmpty else { return "" }
+        let encodedPairs: [(String, String)] = query.map { item in
+            (awsEncode(item.name), awsEncode(item.value ?? ""))
+        }
+        let sortedPairs = encodedPairs.sorted { lhs, rhs in
+            if lhs.0 == rhs.0 {
+                return lhs.1 < rhs.1
+            }
+            return lhs.0 < rhs.0
+        }
+        let parts = sortedPairs.map { pair in
+            "\(pair.0)=\(pair.1)"
+        }
+        return parts.joined(separator: "&")
+    }
+
+    private func awsEncode(_ value: String) -> String {
+        var out = ""
+        for byte in value.utf8 {
+            switch byte {
+            case UInt8(ascii: "A")...UInt8(ascii: "Z"),
+                 UInt8(ascii: "a")...UInt8(ascii: "z"),
+                 UInt8(ascii: "0")...UInt8(ascii: "9"),
+                 UInt8(ascii: "-"), UInt8(ascii: "_"), UInt8(ascii: "."), UInt8(ascii: "~"), UInt8(ascii: "/"):
+                out.append(Character(UnicodeScalar(byte)))
+            default:
+                out += String(format: "%%%02X", byte)
+            }
+        }
+        return out
+    }
+
+    private func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func hmacSHA256(key: Data, data: Data) -> Data {
+        let key = SymmetricKey(data: key)
+        return Data(HMAC<SHA256>.authenticationCode(for: data, using: key))
+    }
+
+    private func deriveSigningKey(secret: String, dateStamp: String, region: String, service: String) -> Data {
+        let secretData = Data("AWS4\(secret)".utf8)
+        let dateKey = hmacSHA256(key: secretData, data: Data(dateStamp.utf8))
+        let regionKey = hmacSHA256(key: dateKey, data: Data(region.utf8))
+        let serviceKey = hmacSHA256(key: regionKey, data: Data(service.utf8))
+        return hmacSHA256(key: serviceKey, data: Data("aws4_request".utf8))
     }
 }
 

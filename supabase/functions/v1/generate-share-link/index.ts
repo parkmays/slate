@@ -24,6 +24,8 @@ interface GenerateShareLinkRequest {
   scope: 'project' | 'scene' | 'subject' | 'assembly'
   scopeId?: string
   expiryHours?: number
+  expiresAt?: string | null
+  role?: 'viewer' | 'commenter' | 'editor'
   password?: string
   permissions: {
     canComment: boolean
@@ -67,6 +69,17 @@ function enforceRateLimit(authorization: string): boolean {
   return true
 }
 
+function permissionsForRole(role: 'viewer' | 'commenter' | 'editor'): GenerateShareLinkRequest['permissions'] {
+  switch (role) {
+    case 'viewer':
+      return { canComment: false, canFlag: false, canRequestAlternate: false }
+    case 'commenter':
+      return { canComment: true, canFlag: false, canRequestAlternate: false }
+    case 'editor':
+      return { canComment: true, canFlag: true, canRequestAlternate: true }
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -100,13 +113,31 @@ serve(async (req) => {
     }
 
     const body: GenerateShareLinkRequest = await req.json()
-    const { projectId, scope, scopeId, expiryHours = 168, password, permissions, notifyEmail } = body
+    const {
+      projectId,
+      scope,
+      scopeId,
+      expiryHours = 168,
+      expiresAt: rawExpiresAt,
+      role: rawRole = 'viewer',
+      password,
+      permissions,
+      notifyEmail,
+    } = body
 
     if (!projectId || !scope || !permissions) {
       return errorResponse(400, 'Missing required fields', 'missing_fields')
     }
 
-    if (expiryHours < 1 || expiryHours > 720) {
+    if (rawRole !== 'viewer' && rawRole !== 'commenter' && rawRole !== 'editor') {
+      return errorResponse(400, 'role must be viewer, commenter, or editor', 'invalid_role')
+    }
+
+    if (rawExpiresAt != null && Number.isNaN(new Date(rawExpiresAt).getTime())) {
+      return errorResponse(400, 'expiresAt must be a valid ISO 8601 timestamp', 'invalid_expires_at')
+    }
+
+    if (rawExpiresAt == null && (expiryHours < 1 || expiryHours > 720)) {
       return errorResponse(400, 'expiryHours must be between 1 and 720', 'invalid_expiry_hours')
     }
 
@@ -127,7 +158,9 @@ serve(async (req) => {
 
     const token = nanoid(32)
     const passwordHash = password ? await bcrypt.hash(password) : null
-    const expiresAt = new Date(Date.now() + expiryHours * 60 * 60 * 1000).toISOString()
+    const expiresAt = rawExpiresAt ?? new Date(Date.now() + expiryHours * 60 * 60 * 1000).toISOString()
+    const role = rawRole
+    const normalizedPermissions = permissionsForRole(role)
 
     const { data: shareLink, error: insertError } = await supabase
       .from('share_links')
@@ -138,10 +171,12 @@ serve(async (req) => {
         scope_id: scopeId || null,
         password_hash: passwordHash,
         expires_at: expiresAt,
-        permissions,
+        role,
+        permissions: normalizedPermissions,
         created_by: user.id,
+        notify_email: notifyEmail ?? null,
       })
-      .select('token, expires_at')
+      .select('token, expires_at, role')
       .single()
 
     if (insertError || !shareLink) {
@@ -174,6 +209,7 @@ serve(async (req) => {
       token: shareLink.token,
       url: reviewUrl,
       expiresAt: shareLink.expires_at,
+      role: shareLink.role,
     })
   } catch (error) {
     console.error('Error in generate-share-link:', error)

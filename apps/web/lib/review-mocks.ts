@@ -102,6 +102,7 @@ function buildMockShareLink(
     scope_id: null,
     password_hash: null,
     expires_at: '2026-04-30T18:00:00.000Z',
+    role: 'editor',
     view_count: 4,
     permissions: {
       canComment: true,
@@ -174,6 +175,7 @@ export function getMockReviewFixture(token: string): ReviewMockFixture | null {
             body: 'Seeded note for smoke coverage.',
             type: 'text',
             voiceUrl: null,
+            spatialData: null,
             createdAt: '2026-03-29T18:02:00.000Z',
             resolvedAt: null,
             isResolved: false,

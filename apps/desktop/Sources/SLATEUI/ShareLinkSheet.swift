@@ -23,12 +23,11 @@ public struct ShareLinkSheet: View {
     @EnvironmentObject private var supabaseManager: SupabaseManager
 
     @State private var scope: ShareLinkScope = .project
-    @State private var expiryHours: Int = 168
+    @State private var role: ShareLinkRole = .viewer
+    @State private var useCustomExpiry = false
+    @State private var expiresAtDate = Date().addingTimeInterval(7 * 24 * 60 * 60)
     @State private var usePassword = false
     @State private var password = ""
-    @State private var canComment = true
-    @State private var canFlag = true
-    @State private var canRequestAlternate = false
     @State private var isGenerating = false
     @State private var result: ShareLinkResult?
     @State private var errorMessage: String?
@@ -67,12 +66,11 @@ public struct ShareLinkSheet: View {
                 ShareLinkFormView(
                     project: project,
                     scope: $scope,
-                    expiryHours: $expiryHours,
+                    role: $role,
+                    useCustomExpiry: $useCustomExpiry,
+                    expiresAtDate: $expiresAtDate,
                     usePassword: $usePassword,
                     password: $password,
-                    canComment: $canComment,
-                    canFlag: $canFlag,
-                    canRequestAlternate: $canRequestAlternate,
                     isGenerating: isGenerating,
                     errorMessage: errorMessage,
                     onCancel: { dismiss() },
@@ -96,17 +94,17 @@ public struct ShareLinkSheet: View {
             ?? ProcessInfo.processInfo.environment["SLATE_DEBUG_JWT"]
             ?? ""
 
-        let permissions = ShareLinkPermissions(
-            canComment: canComment,
-            canFlag: canFlag,
-            canRequestAlternate: canRequestAlternate
-        )
+        let permissions = permissionsForRole(role)
+        let expiresAt = useCustomExpiry
+            ? ISO8601DateFormatter().string(from: expiresAtDate)
+            : nil
 
         do {
             let r = try await ShareLinkService.shared.generateShareLink(
                 projectId: project.id,
                 scope: scope,
-                expiryHours: expiryHours,
+                expiresAt: expiresAt,
+                role: role,
                 password: usePassword && !password.isEmpty ? password : nil,
                 permissions: permissions,
                 jwt: jwt
@@ -118,6 +116,17 @@ public struct ShareLinkSheet: View {
 
         isGenerating = false
     }
+
+    private func permissionsForRole(_ role: ShareLinkRole) -> ShareLinkPermissions {
+        switch role {
+        case .viewer:
+            return .reviewOnly
+        case .commenter:
+            return ShareLinkPermissions(canComment: true, canFlag: false, canRequestAlternate: false)
+        case .editor:
+            return .fullAccess
+        }
+    }
 }
 
 // MARK: - Form
@@ -125,24 +134,15 @@ public struct ShareLinkSheet: View {
 private struct ShareLinkFormView: View {
     let project: Project
     @Binding var scope: ShareLinkScope
-    @Binding var expiryHours: Int
+    @Binding var role: ShareLinkRole
+    @Binding var useCustomExpiry: Bool
+    @Binding var expiresAtDate: Date
     @Binding var usePassword: Bool
     @Binding var password: String
-    @Binding var canComment: Bool
-    @Binding var canFlag: Bool
-    @Binding var canRequestAlternate: Bool
     let isGenerating: Bool
     let errorMessage: String?
     let onCancel: () -> Void
     let onGenerate: () -> Void
-
-    private let expiryOptions: [(label: String, hours: Int)] = [
-        ("24 hours", 24),
-        ("3 days", 72),
-        ("7 days", 168),
-        ("14 days", 336),
-        ("30 days", 720)
-    ]
 
     var body: some View {
         ScrollView {
@@ -170,15 +170,36 @@ private struct ShareLinkFormView: View {
                 // Expiry
                 GroupBox {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Link Expiry")
+                        Text("Day-Player Role")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Picker("Expires after", selection: $expiryHours) {
-                            ForEach(expiryOptions, id: \.hours) { opt in
-                                Text(opt.label).tag(opt.hours)
+
+                        Picker("Role", selection: $role) {
+                            ForEach(ShareLinkRole.allCases, id: \.self) { option in
+                                Text(option.displayName).tag(option)
                             }
                         }
                         .pickerStyle(.menu)
+
+                        Text("Viewer can watch only. Commenter can leave notes. Editor can comment, flag, and request alternates.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                // Expiry
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Set expiration date", isOn: $useCustomExpiry)
+                            .font(.subheadline)
+                        if useCustomExpiry {
+                            DatePicker(
+                                "Expires at",
+                                selection: $expiresAtDate,
+                                in: Date()...,
+                                displayedComponents: [.date, .hourAndMinute]
+                            )
+                        }
                     }
                 }
 
@@ -191,18 +212,6 @@ private struct ShareLinkFormView: View {
                             SecureField("Enter password", text: $password)
                                 .textFieldStyle(.roundedBorder)
                         }
-                    }
-                }
-
-                // Permissions
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Reviewer Permissions")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Toggle("Can add comments", isOn: $canComment)
-                        Toggle("Can flag clips", isOn: $canFlag)
-                        Toggle("Can request alternate takes", isOn: $canRequestAlternate)
                     }
                 }
 
@@ -297,9 +306,15 @@ private struct ShareLinkResultView: View {
                 .help(copied ? "Copied!" : "Copy to clipboard")
             }
 
-            Text("Expires: \(result.expiresAt)")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            if result.expiresAt == nil {
+                Text("Expires: Does not expire")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                Text("Expires: \(result.expiresAt ?? "")")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
 
             HStack {
                 Button("Open in Browser") {

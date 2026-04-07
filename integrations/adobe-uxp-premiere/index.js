@@ -4,11 +4,13 @@
  */
 
 const ME_URL = "https://api.frame.io/v4/me";
+const BRIDGE_PROJECTS_URL = "http://127.0.0.1:8544/api/nle/projects";
 
 function init() {
   const tokenEl = document.getElementById("token");
   const outEl = document.getElementById("out");
   const probeBtn = document.getElementById("probe");
+  const bridgeBtn = document.getElementById("probe-bridge");
 
   probeBtn.addEventListener("click", async () => {
     const token = tokenEl.value.trim();
@@ -52,6 +54,17 @@ function init() {
       }
     } catch (err) {
       outEl.textContent = String(err);
+    }
+  });
+
+  bridgeBtn.addEventListener("click", async () => {
+    outEl.textContent = "Requesting local SLATE bridge…";
+    try {
+      const res = await fetch(BRIDGE_PROJECTS_URL);
+      const text = await res.text();
+      outEl.textContent = `${res.status} ${res.statusText}\n\n${text}`;
+    } catch (err) {
+      outEl.textContent = `Local bridge request failed: ${String(err)}`;
     }
   });
 }

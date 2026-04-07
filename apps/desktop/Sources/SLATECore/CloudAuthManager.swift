@@ -134,6 +134,9 @@ public final class CloudAuthManager: ObservableObject {
     }
 
     public func connect(provider: CloudSyncProvider) async throws {
+        if provider == .amazonS3 {
+            throw CloudAuthError.tokenExchangeFailed("Amazon S3 uses access-key credentials (SLATE_S3_* env vars) and does not require OAuth connect.")
+        }
         let descriptor = OAuthProviderDescriptor.make(for: provider)
         let configuration = effectiveConfiguration(for: provider)
         guard !configuration.clientId.isEmpty else {
@@ -368,6 +371,14 @@ public final class CloudAuthManager: ObservableObject {
                 return try await fetchGoogleAccount(accessToken: accessToken, expiresAt: expiresAt)
             case .dropbox:
                 return try await fetchDropboxAccount(accessToken: accessToken, expiresAt: expiresAt)
+            case .amazonS3:
+                return CloudProviderAccount(
+                    provider: .amazonS3,
+                    displayName: "Amazon S3",
+                    email: nil,
+                    accountId: ProcessInfo.processInfo.environment["SLATE_S3_BUCKET"],
+                    expiresAt: nil
+                )
             case .frameIO:
                 return try await fetchFrameIOAccount(accessToken: accessToken, expiresAt: expiresAt)
             }
@@ -498,6 +509,13 @@ private struct OAuthProviderDescriptor: Sendable {
                 additionalAuthorizationItems: [
                     URLQueryItem(name: "token_access_type", value: "offline")
                 ]
+            )
+        case .amazonS3:
+            return OAuthProviderDescriptor(
+                authorizationEndpoint: URL(string: "https://example.invalid/s3/no-oauth")!,
+                tokenEndpoint: URL(string: "https://example.invalid/s3/no-oauth")!,
+                scopes: [],
+                additionalAuthorizationItems: []
             )
         case .frameIO:
             return OAuthProviderDescriptor(
@@ -864,6 +882,8 @@ private extension CloudSyncProvider {
             return "SLATE_GOOGLE_DRIVE_CLIENT_ID"
         case .dropbox:
             return "SLATE_DROPBOX_APP_KEY"
+        case .amazonS3:
+            return "SLATE_S3_ACCESS_KEY_ID"
         case .frameIO:
             return "SLATE_FRAMEIO_CLIENT_ID"
         }
@@ -875,6 +895,8 @@ private extension CloudSyncProvider {
             return nil
         case .dropbox:
             return "SLATE_DROPBOX_APP_SECRET"
+        case .amazonS3:
+            return "SLATE_S3_SECRET_ACCESS_KEY"
         case .frameIO:
             return "SLATE_FRAMEIO_CLIENT_SECRET"
         }

@@ -25,6 +25,10 @@ public struct WatchFolderSheet: View {
     @State private var isAdding = false
     @State private var errorMessage: String?
     @State private var isDroppingOver = false
+    @State private var uploadThrottleText = ""
+    @State private var transcodeScaleDivisorText = "4"
+    @State private var transcodeBitrateText = "8000000"
+    @State private var watermarkOpacityText = "0.85"
 
     @State private var digestEnabled = false
     @State private var digestHour = 21
@@ -52,6 +56,40 @@ public struct WatchFolderSheet: View {
                     .foregroundColor(.secondary)
                 Text(project.name)
                     .font(.subheadline)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Upload throttle (optional)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                HStack(spacing: 8) {
+                    TextField("Unlimited", text: $uploadThrottleText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                    Text("bytes/sec for R2 proxy upload")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Custom transcode profile")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                HStack {
+                    TextField("Scale divisor", text: $transcodeScaleDivisorText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 120)
+                    TextField("Bitrate (bps)", text: $transcodeBitrateText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 140)
+                    TextField("Watermark opacity", text: $watermarkOpacityText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 140)
+                }
+                Text("Example: divisor 4, bitrate 8000000, opacity 0.85")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
 
             dailyDigestSection
@@ -268,7 +306,22 @@ public struct WatchFolderSheet: View {
 
         Task {
             do {
-                let folder = try await projectStore.addWatchFolder(path: selectedPath, to: project)
+                let throttle = Int(uploadThrottleText.trimmingCharacters(in: .whitespacesAndNewlines))
+                let scaleDivisor = Int(transcodeScaleDivisorText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 4
+                let bitrate = Int(transcodeBitrateText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 8_000_000
+                let opacity = Double(watermarkOpacityText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0.85
+                let profile = ProxyTranscodeProfile(
+                    name: "Custom \(project.name)",
+                    scaleDivisor: scaleDivisor,
+                    bitrateBps: bitrate,
+                    watermarkOpacity: opacity
+                )
+                let folder = try await projectStore.addWatchFolder(
+                    path: selectedPath,
+                    to: project,
+                    uploadThrottleBytesPerSecond: (throttle ?? 0) > 0 ? throttle : nil,
+                    transcodeProfile: profile
+                )
                 if let ingestDaemon = appState.ingestDaemon {
                     try await ingestDaemon.addWatchFolder(folder)
                 }

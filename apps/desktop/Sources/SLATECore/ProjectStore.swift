@@ -99,13 +99,34 @@ public final class ProjectStore: ObservableObject {
         activeProject = project
     }
 
-    public func addWatchFolder(path: String, to project: Project) async throws -> WatchFolder {
-        let watchFolder = WatchFolder(path: path, projectId: project.id, mode: project.mode)
+    public func addWatchFolder(
+        path: String,
+        to project: Project,
+        uploadThrottleBytesPerSecond: Int? = nil,
+        transcodeProfile: ProxyTranscodeProfile? = nil
+    ) async throws -> WatchFolder {
+        let watchFolder = WatchFolder(
+            path: path,
+            projectId: project.id,
+            mode: project.mode,
+            uploadThrottleBytesPerSecond: uploadThrottleBytesPerSecond,
+            transcodeProfile: transcodeProfile
+        )
         watchFoldersByProject[project.id, default: []].append(watchFolder)
 
         let dbPath = GRDBClipStore.defaultDBPath()
         try await GRDBStore.shared.setup(at: dbPath)
         try await GRDBStore.shared.saveWatchFolder(watchFolder)
+        if let profile = transcodeProfile {
+            let existing = ProjectSettingsPersistence.loadTranscodeProfiles(projectId: project.id)
+            var profiles = existing.profiles.filter { $0.id != profile.id }
+            profiles.append(profile)
+            ProjectSettingsPersistence.saveTranscodeProfiles(
+                projectId: project.id,
+                profiles: profiles,
+                selectedProfileId: profile.id
+            )
+        }
 
         NotificationCenter.default.post(
             name: .watchFoldersUpdated,

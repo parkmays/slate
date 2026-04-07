@@ -176,7 +176,12 @@ public actor IngestPipeline {
         proxyClip.syncedAudioPath = syncedAudioPath
         let proxyGenerator = ProxyGenerator(dbQueue: try await store.dbQueue, grdbStore: store)
         let burnIn = watchConfig.burnInConfig ?? BurnInConfig()
-        try await proxyGenerator.generateProxy(for: proxyClip, burnInConfig: burnIn)
+        try await proxyGenerator.generateProxy(
+            for: proxyClip,
+            burnInConfig: burnIn,
+            uploadThrottleBytesPerSecond: watchConfig.uploadThrottleBytesPerSecond,
+            transcodeProfile: watchConfig.transcodeProfile
+        )
 
         try await store.updateIngestQueueStage(id: queueItem.id, stage: .ready, startedAt: Date())
 

@@ -69,7 +69,10 @@ describe('clipMatchesShareScope', () => {
 })
 
 describe('requireShareLinkAccess', () => {
-  function createSupabaseShareLinkMock(passwordHash: string | null) {
+  function createSupabaseShareLinkMock(
+    passwordHash: string | null,
+    overrides: Partial<Record<string, unknown>> = {}
+  ) {
     return {
       from: () => ({
         select: () => ({
@@ -82,6 +85,7 @@ describe('requireShareLinkAccess', () => {
                 scope: 'project',
                 scope_id: null,
                 expires_at: '2099-01-01T00:00:00.000Z',
+                role: 'editor',
                 password_hash: passwordHash,
                 permissions: {
                   canComment: true,
@@ -89,6 +93,7 @@ describe('requireShareLinkAccess', () => {
                   canRequestAlternate: true,
                 },
                 revoked_at: null,
+                ...overrides,
               },
               error: null,
             }),
@@ -122,6 +127,29 @@ describe('requireShareLinkAccess', () => {
       })
     ).resolves.toMatchObject({
       token: 'valid-share-token',
+    })
+  })
+
+  it('allows non-expiring links and applies viewer role permissions', async () => {
+    const supabase = createSupabaseShareLinkMock(null, {
+      expires_at: null,
+      role: 'viewer',
+      permissions: {
+        canComment: true,
+        canFlag: true,
+        canRequestAlternate: true,
+      },
+    })
+
+    await expect(
+      requireShareLinkAccess(supabase as never, 'valid-share-token')
+    ).resolves.toMatchObject({
+      role: 'viewer',
+      permissions: {
+        canComment: false,
+        canFlag: false,
+        canRequestAlternate: false,
+      },
     })
   })
 })

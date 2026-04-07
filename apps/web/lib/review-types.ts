@@ -2,6 +2,46 @@ export type ReviewStatus = 'unreviewed' | 'circled' | 'flagged' | 'x' | 'deprior
 
 export type AnnotationType = 'text' | 'voice'
 
+export type SpatialShapeKind = 'arrow' | 'ellipse' | 'freehand'
+
+export interface SpatialPoint {
+  x: number
+  y: number
+}
+
+export interface SpatialShapeBase {
+  id: string
+  kind: SpatialShapeKind
+  stroke: string
+  strokeWidthNorm: number
+}
+
+export interface SpatialArrowShape extends SpatialShapeBase {
+  kind: 'arrow'
+  from: SpatialPoint
+  to: SpatialPoint
+}
+
+export interface SpatialEllipseShape extends SpatialShapeBase {
+  kind: 'ellipse'
+  cx: number
+  cy: number
+  rx: number
+  ry: number
+}
+
+export interface SpatialFreehandShape extends SpatialShapeBase {
+  kind: 'freehand'
+  points: SpatialPoint[]
+}
+
+export type SpatialShape = SpatialArrowShape | SpatialEllipseShape | SpatialFreehandShape
+
+export interface SpatialAnnotationPayload {
+  version: 1
+  shapes: SpatialShape[]
+}
+
 export interface ReviewAnnotationReply {
   id: string
   annotationId: string
@@ -18,6 +58,8 @@ export interface ReviewSharePermissions {
   canRequestAlternate: boolean
 }
 
+export type ShareLinkRole = 'viewer' | 'commenter' | 'editor'
+
 export interface ReviewAnnotation {
   id: string
   userId: string
@@ -29,6 +71,7 @@ export interface ReviewAnnotation {
   body: string
   type: AnnotationType
   voiceUrl: string | null
+  spatialData: SpatialAnnotationPayload | null
   createdAt: string
   resolvedAt: string | null
   isResolved: boolean
@@ -136,7 +179,8 @@ export interface ReviewShareLink {
   scope: 'project' | 'scene' | 'subject' | 'assembly'
   scope_id: string | null
   password_hash: string | null
-  expires_at: string
+  expires_at: string | null
+  role: ShareLinkRole
   view_count?: number
   last_viewed_at?: string | null
   revoked_at?: string | null

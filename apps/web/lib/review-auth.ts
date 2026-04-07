@@ -29,3 +29,11 @@ export function hasValidReviewAccessCookie(
     return false
   }
 }
+
+export function isShareLinkExpired(expiresAt: string | null | undefined): boolean {
+  if (!expiresAt) {
+    return false
+  }
+
+  return new Date(expiresAt) < new Date()
+}

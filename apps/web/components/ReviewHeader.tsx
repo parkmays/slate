@@ -24,7 +24,7 @@ import { format } from 'date-fns'
 interface ReviewHeaderShareLink {
   scope: 'project' | 'scene' | 'subject' | 'assembly'
   password_hash: string | null
-  expires_at: string
+  expires_at: string | null
   view_count?: number
 }
 
@@ -50,8 +50,8 @@ export function ReviewHeader({ projectName, projectMode, token, shareLink }: Rev
     window.open(`/api/review/${token}/annotations/export?format=${format}`, '_blank')
   }
   
-  const expiresAt = new Date(shareLink.expires_at)
-  const isExpired = expiresAt < new Date()
+  const expiresAt = shareLink.expires_at ? new Date(shareLink.expires_at) : null
+  const isExpired = expiresAt ? expiresAt < new Date() : false
   
   return (
     <header className="review-header relative">
@@ -81,7 +81,9 @@ export function ReviewHeader({ projectName, projectMode, token, shareLink }: Rev
           <div className="flex items-center gap-1">
             <Calendar className="w-4 h-4" />
             <span>
-              {isExpired ? 'Expired' : `Expires ${format(expiresAt, 'MMM d, yyyy')}`}
+              {shareLink.expires_at == null
+                ? 'No expiration'
+                : (isExpired ? 'Expired' : `Expires ${format(expiresAt!, 'MMM d, yyyy')}`)}
             </span>
           </div>
           
@@ -152,7 +154,9 @@ export function ReviewHeader({ projectName, projectMode, token, shareLink }: Rev
             </div>
             <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2">
               <div className="text-xs uppercase tracking-wide text-zinc-500">Expires</div>
-              <div className="mt-1 text-zinc-200">{expiresAt.toLocaleString()}</div>
+              <div className="mt-1 text-zinc-200">
+                {expiresAt ? expiresAt.toLocaleString() : 'Does not expire'}
+              </div>
             </div>
             <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2">
               <div className="text-xs uppercase tracking-wide text-zinc-500">Link Analytics</div>

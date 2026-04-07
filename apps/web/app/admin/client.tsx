@@ -9,7 +9,7 @@ interface ShareLink {
   scope: 'project' | 'scene' | 'subject' | 'assembly'
   scope_id: string | null
   created_at: string
-  expires_at: string
+  expires_at: string | null
   password_hash: string | null
   permissions?: Record<string, unknown> | null
   revoked_at?: string | null
@@ -23,10 +23,16 @@ function isLinkRevoked(shareLink: ShareLink): boolean {
 }
 
 function isLinkExpired(shareLink: ShareLink): boolean {
+  if (!shareLink.expires_at) {
+    return false
+  }
   return !isLinkRevoked(shareLink) && new Date(shareLink.expires_at) < new Date()
 }
 
 function isLinkActive(shareLink: ShareLink): boolean {
+  if (!shareLink.expires_at) {
+    return !isLinkRevoked(shareLink)
+  }
   return !isLinkRevoked(shareLink) && new Date(shareLink.expires_at) >= new Date()
 }
 
@@ -44,7 +50,11 @@ function filterLinks(links: ShareLink[], status: StatusFilter): ShareLink[] {
   return links
 }
 
-function formatDate(dateString: string): string {
+function formatDate(dateString: string | null): string {
+  if (!dateString) {
+    return 'Does not expire'
+  }
+
   return new Date(dateString).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',

@@ -387,18 +387,22 @@ public actor GRDBStore {
         try await queue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO watch_folders (path, project_id, mode, burn_in_config, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO watch_folders (path, project_id, mode, burn_in_config, upload_throttle_bps, transcode_profile, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(path) DO UPDATE SET
                         project_id = excluded.project_id,
                         mode = excluded.mode,
-                        burn_in_config = excluded.burn_in_config
+                        burn_in_config = excluded.burn_in_config,
+                        upload_throttle_bps = excluded.upload_throttle_bps,
+                        transcode_profile = excluded.transcode_profile
                 """,
                 arguments: [
                     watchFolder.path,
                     watchFolder.projectId,
                     watchFolder.mode.rawValue,
                     try Self.encodeJSON(watchFolder.burnInConfig),
+                    watchFolder.uploadThrottleBytesPerSecond,
+                    try Self.encodeJSON(watchFolder.transcodeProfile),
                     createdAt
                 ]
             )
@@ -411,7 +415,7 @@ public actor GRDBStore {
             let rows = try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT path, project_id, mode, burn_in_config
+                    SELECT path, project_id, mode, burn_in_config, upload_throttle_bps, transcode_profile
                     FROM watch_folders
                     ORDER BY created_at ASC
                 """
@@ -523,6 +527,8 @@ public actor GRDBStore {
                 path TEXT PRIMARY KEY NOT NULL,
                 project_id TEXT NOT NULL,
                 mode TEXT NOT NULL,
+                upload_throttle_bps INTEGER,
+                transcode_profile TEXT,
                 created_at TEXT NOT NULL
             )
         """)
@@ -532,6 +538,12 @@ public actor GRDBStore {
         })
         if !watchFolderColumns.contains("burn_in_config") {
             try db.execute(sql: "ALTER TABLE watch_folders ADD COLUMN burn_in_config TEXT")
+        }
+        if !watchFolderColumns.contains("upload_throttle_bps") {
+            try db.execute(sql: "ALTER TABLE watch_folders ADD COLUMN upload_throttle_bps INTEGER")
+        }
+        if !watchFolderColumns.contains("transcode_profile") {
+            try db.execute(sql: "ALTER TABLE watch_folders ADD COLUMN transcode_profile TEXT")
         }
 
         try db.execute(sql: """
@@ -713,11 +725,19 @@ public actor GRDBStore {
         } else {
             burnIn = nil
         }
+        let transcodeProfile: ProxyTranscodeProfile?
+        if let payload = row["transcode_profile"] as String?, !payload.isEmpty {
+            transcodeProfile = try? JSONDecoder().decode(ProxyTranscodeProfile.self, from: Data(payload.utf8))
+        } else {
+            transcodeProfile = nil
+        }
         return WatchFolder(
             path: row["path"],
             projectId: row["project_id"],
             mode: mode,
-            burnInConfig: burnIn
+            burnInConfig: burnIn,
+            uploadThrottleBytesPerSecond: row["upload_throttle_bps"],
+            transcodeProfile: transcodeProfile
         )
     }
 

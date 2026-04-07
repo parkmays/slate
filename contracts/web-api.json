@@ -12,6 +12,8 @@
         "scope": "project|scene|subject|assembly",
         "scopeId": "string|null",
         "expiryHours": "number (default: 168)",
+        "expiresAt": "string|null (ISO 8601 absolute timestamp)",
+        "role": "viewer|commenter|editor (default: viewer)",
         "password": "string|null",
         "permissions": {
           "canComment": "boolean",
@@ -22,7 +24,7 @@
       "response": {
         "token": "string",
         "url": "string (https://slate.app/review/{token})",
-        "expiresAt": "string (ISO 8601)"
+        "expiresAt": "string|null (ISO 8601)"
       }
     },
     "signProxyUrl": {

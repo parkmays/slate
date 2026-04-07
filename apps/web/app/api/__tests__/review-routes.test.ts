@@ -82,6 +82,7 @@ function createSupabaseMock(options?: {
                   scope: 'project',
                   scope_id: null,
                   expires_at: '2099-01-01T00:00:00.000Z',
+                  role: 'editor',
                   password_hash: null,
                   permissions: {
                     canComment: true,
@@ -169,6 +170,7 @@ function createExportSupabaseMock() {
                   scope: 'scene',
                   scope_id: 'scene-1',
                   expires_at: '2099-01-01T00:00:00.000Z',
+                  role: 'editor',
                   password_hash: 'unused-hash',
                   permissions: {
                     canComment: true,
@@ -352,6 +354,7 @@ describe('review routes', () => {
         body: 'Needs alt take.',
         type: 'text',
         voiceUrl: null,
+        spatialData: null,
         createdAt: '2026-03-31T12:00:00.000Z',
         resolvedAt: null,
         isResolved: false,
@@ -430,6 +433,7 @@ describe('review routes', () => {
   it('rejects status updates when the share link cannot flag clips', async () => {
     const supabaseMock = createSupabaseMock({
       shareLink: {
+        role: 'commenter',
         permissions: {
           canComment: true,
           canFlag: false,

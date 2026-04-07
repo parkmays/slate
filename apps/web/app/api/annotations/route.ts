@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
+  assertValidSpatialData,
   assertValidAnnotationTextBody,
   assertValidTimecodeIn,
   assertValidVoicePayload,
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
     const annotationType = body.type
     const annotationBody = typeof body.body === 'string' ? body.body.trim() : ''
     const voiceUrl = typeof body.voiceUrl === 'string' ? body.voiceUrl : null
+    const spatialData = body.spatialData ?? body.spatial_data ?? null
     const shareToken = request.headers.get('X-Share-Token') ?? body.shareToken
 
     const isValidPayload = (
@@ -41,7 +43,7 @@ export async function POST(request: NextRequest) {
       (
         annotationType === 'voice'
           ? Boolean(voiceUrl)
-          : Boolean(annotationBody)
+          : Boolean(annotationBody) || spatialData != null
       )
     )
 
@@ -75,6 +77,7 @@ export async function POST(request: NextRequest) {
       assertValidVoicePayload(voiceUrl!)
     } else {
       assertValidAnnotationTextBody(sanitizeReviewTextBody(annotationBody))
+      assertValidSpatialData(spatialData)
     }
 
     const annotation = await createAnnotationRecord(supabase, {
@@ -85,6 +88,7 @@ export async function POST(request: NextRequest) {
       timeOffsetSeconds,
       type: annotationType,
       voiceUrl,
+      spatialData,
     })
 
     await broadcastClipEvent(supabase, clipId, 'annotation_added', { annotation })

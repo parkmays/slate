@@ -52,6 +52,7 @@ function makeClip(overrides: Partial<ReviewClip> = {}): ReviewClip {
         body: 'Love this beat, @editor keep the softer pickup.',
         type: 'text',
         voiceUrl: null,
+        spatialData: null,
         createdAt: '2026-04-01T10:10:00.000Z',
         resolvedAt: null,
         isResolved: false,

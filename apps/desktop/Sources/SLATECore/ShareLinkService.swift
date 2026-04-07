@@ -50,13 +50,31 @@ public struct ShareLinkPermissions: Codable, Sendable {
     )
 }
 
+/// Share-link role aligned with day-player access controls.
+public enum ShareLinkRole: String, CaseIterable, Codable, Sendable {
+    case viewer
+    case commenter
+    case editor
+
+    public var displayName: String {
+        switch self {
+        case .viewer:
+            return "Viewer"
+        case .commenter:
+            return "Commenter"
+        case .editor:
+            return "Editor"
+        }
+    }
+}
+
 /// Successful result from generate-share-link.
 public struct ShareLinkResult: Sendable {
     public let token: String
     public let url: String
-    public let expiresAt: String
+    public let expiresAt: String?
 
-    public init(token: String, url: String, expiresAt: String) {
+    public init(token: String, url: String, expiresAt: String?) {
         self.token = token
         self.url = url
         self.expiresAt = expiresAt
@@ -136,7 +154,9 @@ public final class ShareLinkService: Sendable {
     ///   - projectId: UUID of the project to share.
     ///   - scope: Granularity of the shared view (project, scene, subject, assembly).
     ///   - scopeId: Optional ID when scope is scene/subject/assembly.
-    ///   - expiryHours: Hours until expiry (default 168 = 7 days).
+    ///   - expiryHours: Legacy expiry in hours used when `expiresAt` is omitted.
+    ///   - expiresAt: Optional absolute expiry timestamp in ISO 8601 format. Nil means no expiry.
+    ///   - role: Day-player access role (viewer/commenter/editor).
     ///   - password: Optional access password; nil means no password.
     ///   - permissions: Reviewer interaction flags.
     ///   - jwt: Supabase JWT for the authenticated desktop user.
@@ -145,6 +165,8 @@ public final class ShareLinkService: Sendable {
         scope: ShareLinkScope,
         scopeId: String? = nil,
         expiryHours: Int = 168,
+        expiresAt: String? = nil,
+        role: ShareLinkRole = .viewer,
         password: String? = nil,
         permissions: ShareLinkPermissions = .fullAccess,
         jwt: String
@@ -160,6 +182,8 @@ public final class ShareLinkService: Sendable {
             let scope: String
             let scopeId: String?
             let expiryHours: Int
+            let expiresAt: String?
+            let role: String
             let password: String?
             let permissions: ShareLinkPermissions
         }
@@ -171,6 +195,8 @@ public final class ShareLinkService: Sendable {
             scope: scope.rawValue,
             scopeId: scopeId,
             expiryHours: expiryHours,
+            expiresAt: expiresAt,
+            role: role.rawValue,
             password: password,
             permissions: permissions
         ))
@@ -181,7 +207,7 @@ public final class ShareLinkService: Sendable {
         struct Response: Decodable {
             let token: String
             let url: String
-            let expiresAt: String
+            let expiresAt: String?
         }
 
         let decoder = JSONDecoder()

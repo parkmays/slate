@@ -681,11 +681,24 @@ public struct WatchFolder: Codable, Sendable, Equatable {
     public var mode: ProjectMode
     /// Optional burn-in defaults for proxies ingested through this folder.
     public var burnInConfig: BurnInConfig?
+    /// Optional upload bandwidth limit used by remote proxy uploads (bytes per second).
+    public var uploadThrottleBytesPerSecond: Int?
+    /// Optional custom transcode profile for proxy generation.
+    public var transcodeProfile: ProxyTranscodeProfile?
 
-    public init(path: String, projectId: String, mode: ProjectMode, burnInConfig: BurnInConfig? = nil) {
+    public init(
+        path: String,
+        projectId: String,
+        mode: ProjectMode,
+        burnInConfig: BurnInConfig? = nil,
+        uploadThrottleBytesPerSecond: Int? = nil,
+        transcodeProfile: ProxyTranscodeProfile? = nil
+    ) {
         self.path = path
         self.projectId = projectId
         self.mode = mode
         self.burnInConfig = burnInConfig
+        self.uploadThrottleBytesPerSecond = uploadThrottleBytesPerSecond
+        self.transcodeProfile = transcodeProfile
     }
 }

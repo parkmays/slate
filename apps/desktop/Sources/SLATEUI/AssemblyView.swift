@@ -497,7 +497,7 @@ struct AssemblyView: View {
                         let result = try await ShareLinkService.shared.generateShareLink(
                             projectId: project.id,
                             scope: .assembly,
-                            expiryHours: 168,
+                            role: .editor,
                             permissions: .fullAccess,
                             jwt: jwt
                         )

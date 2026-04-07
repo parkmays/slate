@@ -95,11 +95,14 @@ public struct SLATEApp: App {
         do {
             try await GRDBStore.shared.setup(at: dbPath)
             let daemon = try IngestDaemon(dbPath: dbPath)
+            let nleBridge = try NLEPluginBridgeService()
+            await nleBridge.start()
             let watchFolders = try await GRDBStore.shared.allWatchFolders()
             for folder in watchFolders {
                 try await daemon.addWatchFolder(folder)
             }
             appState.ingestDaemon = daemon
+            appState.nlePluginBridge = nleBridge
         } catch {
             appState.startupError = error.localizedDescription
         }
@@ -116,6 +119,7 @@ public class AppState: ObservableObject {
     @Published public var startupError: String?
 
     public var ingestDaemon: IngestDaemon?
+    public var nlePluginBridge: NLEPluginBridgeService?
 
     public init() {}
 }

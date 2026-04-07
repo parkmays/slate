@@ -53,6 +53,8 @@ final class ShareLinkServiceTests: XCTestCase {
             XCTAssertEqual(payload["project_id"] as? String, "project-123")
             XCTAssertEqual(payload["scope"] as? String, "project")
             XCTAssertEqual(payload["expiry_hours"] as? Int, 72)
+            XCTAssertEqual(payload["role"] as? String, "commenter")
+            XCTAssertEqual(payload["expires_at"] as? String, "2026-04-02T10:30:00Z")
 
             let permissions = try XCTUnwrap(payload["permissions"] as? [String: Any])
             XCTAssertEqual(permissions["can_comment"] as? Bool, true)
@@ -75,12 +77,15 @@ final class ShareLinkServiceTests: XCTestCase {
             projectId: "project-123",
             scope: .project,
             expiryHours: 72,
+            expiresAt: "2026-04-02T10:30:00Z",
+            role: .commenter,
             permissions: .init(canComment: true, canFlag: false, canRequestAlternate: true),
             jwt: "test-jwt"
         )
 
         XCTAssertEqual(result.token, "share-token")
         XCTAssertEqual(result.url, "https://slate.app/review/share-token")
+        XCTAssertEqual(result.expiresAt, "2026-04-01T00:00:00Z")
     }
 
     func testSignProxyURLUsesShareTokenHeaderAndAnonKey() async throws {
@@ -116,6 +121,31 @@ final class ShareLinkServiceTests: XCTestCase {
 
         XCTAssertEqual(result.signedUrl, "https://cdn.example/proxy.mp4")
         XCTAssertEqual(result.thumbnailUrl, "https://cdn.example/thumb.jpg")
+    }
+
+    func testGenerateShareLinkAllowsNilExpiresAtInResponse() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            let data = Data(
+                #"{"token":"share-token","url":"https://slate.app/review/share-token","expiresAt":null}"#.utf8
+            )
+            return (response, data)
+        }
+
+        let result = try await makeService().generateShareLink(
+            projectId: "project-123",
+            scope: .project,
+            role: .viewer,
+            jwt: "test-jwt"
+        )
+
+        XCTAssertEqual(result.token, "share-token")
+        XCTAssertEqual(result.expiresAt, nil)
     }
 
     func testGenerateShareLinkFailsFastWhenAnonKeyMissing() async {

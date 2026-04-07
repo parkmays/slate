@@ -63,6 +63,7 @@ const shareLink: ReviewShareLink = {
   scope_id: null,
   password_hash: null,
   expires_at: '2026-04-01T12:00:00.000Z',
+  role: 'editor',
   view_count: 3,
   permissions: {
     canComment: true,

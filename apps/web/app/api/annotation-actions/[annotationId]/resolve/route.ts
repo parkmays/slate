@@ -38,8 +38,8 @@ export async function POST(
 
     const supabase = createServerSupabaseClient()
     const shareLink = await requireShareLinkAccess(supabase, shareToken, request)
-    if (!shareLink.permissions.canComment) {
-      return NextResponse.json({ error: 'Commenting is not permitted for this share link' }, { status: 403 })
+    if (shareLink.role !== 'editor') {
+      return NextResponse.json({ error: 'Only editor links can resolve annotations' }, { status: 403 })
     }
 
     const { data: annotationRow, error: annotationError } = await supabase

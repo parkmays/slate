@@ -9,11 +9,13 @@ import {
   type ReviewPipelineCounts,
   type ReviewSyncCounts,
 } from '@/lib/review-insights'
-import type { ReviewClip } from '@/lib/review-types'
+import type { ReviewClip, ShareLinkRole } from '@/lib/review-types'
 
 interface ReviewOpsPanelProps {
   clips: ReviewClip[]
   selectedClipId: string | null
+  accessRole: ShareLinkRole
+  expiresAt: string | null
   onSelectClip: (clipId: string) => void
   onCompareClip: (clipId: string) => void
 }
@@ -107,10 +109,18 @@ function SyncRow({ counts }: { counts: ReviewSyncCounts }) {
 export function ReviewOpsPanel({
   clips,
   selectedClipId,
+  accessRole,
+  expiresAt,
   onSelectClip,
   onCompareClip,
 }: ReviewOpsPanelProps) {
   const summary = useMemo(() => buildReviewOpsSummary(clips), [clips])
+  const formattedExpiresAt = useMemo(() => {
+    if (!expiresAt) {
+      return 'Does not expire'
+    }
+    return new Date(expiresAt).toLocaleString()
+  }, [expiresAt])
 
   return (
     <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4" data-testid="review-ops-panel">
@@ -122,6 +132,13 @@ export function ReviewOpsPanel({
           Smart selects, workflow pressure, and background pipeline health for the current review set.
         </p>
       </div>
+
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3">
+        <h4 className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-400">Current Access</h4>
+        <p className="mt-2 text-sm text-zinc-200">
+          Access Level: {accessRole.charAt(0).toUpperCase() + accessRole.slice(1)} | Expires: {formattedExpiresAt}
+        </p>
+      </section>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[

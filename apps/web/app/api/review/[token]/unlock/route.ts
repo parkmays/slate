@@ -1,6 +1,6 @@
 import { compare } from 'bcryptjs'
 import { NextRequest, NextResponse } from 'next/server'
-import { reviewAccessCookieName, reviewAccessCookieValue } from '@/lib/review-auth'
+import { isShareLinkExpired, reviewAccessCookieName, reviewAccessCookieValue } from '@/lib/review-auth'
 import { getRequestClientIp } from '@/lib/request-ip'
 import { checkReviewRateLimit, rateLimitResponse } from '@/lib/review-rate-limit'
 import { isLinkRevoked } from '@/lib/review-server'
@@ -33,7 +33,7 @@ export async function POST(
       return NextResponse.json({ error: 'This review link has been revoked' }, { status: 410 })
     }
 
-    if (new Date(shareLink.expires_at) < new Date()) {
+    if (isShareLinkExpired(shareLink.expires_at)) {
       return NextResponse.json({ error: 'This review link has expired' }, { status: 410 })
     }
 
@@ -54,7 +54,7 @@ export async function POST(
       sameSite: 'lax',
       secure: process.env.NODE_ENV === 'production',
       path: '/',
-      expires: new Date(shareLink.expires_at),
+      ...(shareLink.expires_at ? { expires: new Date(shareLink.expires_at) } : {}),
     })
 
     return response
