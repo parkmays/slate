@@ -64,9 +64,13 @@ public enum ProjectSettingsPersistence {
     public static func save(_ project: Project) {
         var all: [String: Persisted] = [:]
         if let data = UserDefaults.standard.data(forKey: defaultsKey),
-           !data.isEmpty,
-           let decoded = try? JSONDecoder().decode([String: Persisted].self, from: data) {
-            all = decoded
+           !data.isEmpty {
+            do {
+                all = try JSONDecoder().decode([String: Persisted].self, from: data)
+            } catch {
+                logger.error("Failed to decode existing settings while saving: \(error.localizedDescription)")
+                // Continue with empty dictionary - better than losing new settings
+            }
         }
 
         all[project.id] = Persisted(

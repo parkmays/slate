@@ -274,6 +274,9 @@ public struct SLATEAPI {
         if let size = sourceSize {
             clipSourceSize = size
         } else {
+            // Note: This is a synchronous I/O operation. In a production environment,
+            // consider moving this to a background queue or making the entire method async
+            // to avoid blocking the calling thread.
             do {
                 let attributes = try FileManager.default.attributesOfItem(atPath: primaryAudio.path)
                 clipSourceSize = (attributes[.size] as? Int64) ?? 0

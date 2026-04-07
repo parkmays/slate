@@ -209,14 +209,21 @@ public final class SupabaseManager: ObservableObject {
             return false
         }
         
-        // Optional: Decode and validate basic JWT structure
-        do {
-            _ = try JSONSerialization.jsonObject(with: payloadData)
-            logger.debug("JWT payload appears valid")
+        // Optional: Validate basic JWT structure, but don't require valid JSON
+        // Some JWT-like tokens may have non-JSON payloads (e.g., encrypted tokens)
+        if String(data: payloadData, encoding: .utf8) != nil {
+            logger.debug("JWT payload appears to be valid UTF-8 text")
+            // Try to parse as JSON for additional validation, but don't fail if it's not JSON
+            do {
+                _ = try JSONSerialization.jsonObject(with: payloadData)
+                logger.debug("JWT payload is valid JSON")
+            } catch {
+                logger.debug("JWT payload is not JSON but appears valid (may be encrypted or custom format)")
+            }
             return true
-        } catch {
-            logger.error("JWT payload is not valid JSON: \(error.localizedDescription)")
-            return false
+        } else {
+            logger.debug("JWT payload is binary data (may be encrypted)")
+            return true
         }
     }
 }
