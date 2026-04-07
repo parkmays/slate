@@ -65,6 +65,11 @@ jobs:
           cd packages/ingest-daemon
           swift test --enable-code-coverage
 
+      - name: Validate ASC MHL fixtures (XSD)
+        run: |
+          export SLATE_MHL_FIXTURE_DIR="$RUNNER_TEMP/slate-mhl-fixtures"
+          bash scripts/validate-ascmhl.sh "$SLATE_MHL_FIXTURE_DIR"
+
       - name: Build Sync Engine
         run: |
           cd packages/sync-engine
@@ -85,10 +90,10 @@ jobs:
           cd packages/ai-pipeline
           swift test --enable-code-coverage
 
-      - name: Root Swift package (integration tests)
+      - name: Root Swift package (all SwiftPM tests)
         run: |
           (cd packages/shared-types && swift build -c release)
-          swift test -c release --filter SLATEIntegrationTests
+          swift test -c release
 
       - name: Build Desktop App
         run: |

@@ -4,6 +4,96 @@ import SLATESharedTypes
 @testable import IngestDaemon
 
 final class IngestDaemonTests: XCTestCase {
+    func testXXH64KnownVectors() {
+        var emptyHasher = XXH64Hasher()
+        emptyHasher.update(Data())
+        XCTAssertEqual(emptyHasher.finalizeHex(), "ef46db3751d8e999")
+
+        var helloHasher = XXH64Hasher()
+        helloHasher.update(Data("hello".utf8))
+        XCTAssertEqual(helloHasher.finalizeHex(), "26c7827d889f6da3")
+    }
+
+    func testVerifiedCopyEngineProducesMatchingHashesAndManifest() throws {
+        let fixtureRoot = ProcessInfo.processInfo.environment["SLATE_MHL_FIXTURE_DIR"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        }
+        let shouldCleanup = fixtureRoot == nil
+        let tempDir = (fixtureRoot ?? FileManager.default.temporaryDirectory)
+            .appendingPathComponent("slate-verified-copy-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer {
+            if shouldCleanup {
+                try? FileManager.default.removeItem(at: tempDir)
+            }
+        }
+
+        let sourceURL = tempDir.appendingPathComponent("source.bin")
+        let destinationURL = tempDir.appendingPathComponent("dest/source.bin")
+        let payload = Data((0..<65_536).map { UInt8($0 % 251) })
+        try payload.write(to: sourceURL)
+        let historyRoot = tempDir.appendingPathComponent("dest", isDirectory: true)
+        let childAscmhlDir = historyRoot
+            .appendingPathComponent("A002R2EC", isDirectory: true)
+            .appendingPathComponent("ascmhl", isDirectory: true)
+        try FileManager.default.createDirectory(at: childAscmhlDir, withIntermediateDirectories: true)
+        let childManifestURL = childAscmhlDir.appendingPathComponent("0001_A002R2EC_2026-01-01_000000.mhl")
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <hashlist version="2.0" xmlns="urn:ASC:MHL:v2.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:ASC:MHL:v2.0 ASCMHL.xsd">
+          <creatorinfo>
+            <creationdate>2026-01-01T00:00:00Z</creationdate>
+            <hostname>fixture</hostname>
+            <tool version="1.0">fixture</tool>
+          </creatorinfo>
+          <processinfo><process>transfer</process></processinfo>
+          <hashes><hash><path size="1">dummy.txt</path><c4 action="original">c41111111111111111111111111111111111111111111111111111111111111111111111111111111111</c4></hash></hashes>
+        </hashlist>
+        """.write(to: childManifestURL, atomically: true, encoding: .utf8)
+        let childChainURL = childAscmhlDir.appendingPathComponent("ascmhl_chain.xml")
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <ascmhldirectory xmlns="urn:ASC:MHL:DIRECTORY:v2.0">
+          <hashlist sequencenr="1">
+            <path>\(childManifestURL.lastPathComponent)</path>
+            <c4>c4CHILDREFERENCE11111111111111111111111111111111111111111111111111111111111111111111</c4>
+          </hashlist>
+        </ascmhldirectory>
+        """.write(to: childChainURL, atomically: true, encoding: .utf8)
+
+        let result = try VerifiedCopyEngine.copyAndVerify(from: sourceURL, to: destinationURL)
+        XCTAssertTrue(result.isVerified)
+        XCTAssertEqual(result.sourceHash, result.destinationHash)
+        XCTAssertEqual(result.bytesCopied, Int64(payload.count))
+
+        let manifestURL = try MHLManifestWriter.write(
+            for: result,
+            sourceURL: sourceURL,
+            destinationURL: destinationURL,
+            historyRootURL: historyRoot
+        )
+        let manifestContents = try String(contentsOf: manifestURL, encoding: .utf8)
+        XCTAssertTrue(manifestContents.contains("<hashlist version=\"2.0\""))
+        XCTAssertTrue(manifestContents.contains("xmlns=\"urn:ASC:MHL:v2.0\""))
+        XCTAssertTrue(manifestContents.contains(result.destinationHash))
+        XCTAssertTrue(manifestContents.contains("<path size=\""))
+        XCTAssertTrue(manifestContents.contains(">source.bin</path>"))
+
+        let chainURL = tempDir
+            .appendingPathComponent("dest", isDirectory: true)
+            .appendingPathComponent("ascmhl", isDirectory: true)
+            .appendingPathComponent("ascmhl_chain.xml")
+        let chainContents = try String(contentsOf: chainURL, encoding: .utf8)
+        XCTAssertTrue(chainContents.contains("<ascmhldirectory xmlns=\"urn:ASC:MHL:DIRECTORY:v2.0\">"))
+        XCTAssertTrue(chainContents.contains("<hashlist sequencenr=\"1\">"))
+        XCTAssertTrue(chainContents.contains(manifestURL.lastPathComponent))
+        XCTAssertTrue(manifestContents.contains("<c4 action=\"verified\""))
+        XCTAssertTrue(manifestContents.contains("<roothash>"))
+        XCTAssertTrue(manifestContents.contains("<references>"))
+        XCTAssertTrue(manifestContents.contains("<path>A002R2EC/ascmhl/0001_A002R2EC_2026-01-01_000000.mhl</path>"))
+        XCTAssertTrue(manifestContents.contains("<c4>c4CHILDREFERENCE11111111111111111111111111111111111111111111111111111111111111111111</c4>"))
+    }
+
     func testProxyGenerationAgainstRRBugRenders() async throws {
         guard ProcessInfo.processInfo.environment["RUN_RRBUG_PROXY_TESTS"] == "1" else {
             throw XCTSkip("Set RUN_RRBUG_PROXY_TESTS=1 to run media integration test")

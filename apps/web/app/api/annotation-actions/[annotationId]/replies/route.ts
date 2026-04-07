@@ -67,6 +67,17 @@ export async function POST(
       annotationId: params.annotationId,
       reply,
     })
+    await broadcastClipEvent(supabase, annotationRow.clip_id, 'nle_marker_event', {
+      eventId: crypto.randomUUID(),
+      origin: 'web',
+      action: 'reply',
+      clipId: annotationRow.clip_id,
+      annotationId: params.annotationId,
+      timecodeIn: null,
+      timeOffsetSeconds: null,
+      body: reply.body,
+      sentAt: new Date().toISOString(),
+    })
 
     return NextResponse.json({ reply }, { status: 201 })
   } catch (error) {

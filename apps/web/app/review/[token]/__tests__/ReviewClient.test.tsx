@@ -165,6 +165,10 @@ describe('ReviewClient', () => {
           })
         }
 
+        if (url === '/api/face-clusters/clip-1') {
+          return jsonResponse({ clusters: [] })
+        }
+
         if (url === '/api/annotations' && init?.method === 'POST') {
           const payload = JSON.parse(String(init.body))
           return jsonResponse(

@@ -58,6 +58,17 @@ public struct SLATEApp: App {
                 }
                 .keyboardShortcut("n", modifiers: .command)
             }
+            CommandMenu("Walkthrough") {
+                Button("Replay Walkthrough") {
+                    appState.walkthroughReplayNonce += 1
+                }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+
+                Button("Customize Toolbar") {
+                    appState.showToolbarCustomizationSheet = true
+                }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+            }
             CommandGroup(replacing: .appInfo) {
                 Button("SLATE Info") {
                     appState.showAboutSheet = true
@@ -117,6 +128,8 @@ public class AppState: ObservableObject {
     @Published public var showAboutSheet: Bool      = false
     @Published public var selectedProject: Project?
     @Published public var startupError: String?
+    @Published public var walkthroughReplayNonce: Int = 0
+    @Published public var showToolbarCustomizationSheet: Bool = false
 
     public var ingestDaemon: IngestDaemon?
     public var nlePluginBridge: NLEPluginBridgeService?

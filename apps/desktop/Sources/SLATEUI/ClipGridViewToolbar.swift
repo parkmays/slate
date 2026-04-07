@@ -30,6 +30,7 @@ struct ClipGridViewToolbar: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 100)
+            .help("Toggle grid/list clip view")
             
             // Search
             HStack {
@@ -45,6 +46,7 @@ struct ClipGridViewToolbar: View {
             .background(Color(NSColor.controlBackgroundColor))
             .cornerRadius(6)
             .frame(maxWidth: 200)
+            .help("Search clips and metadata")
             
             Spacer()
             
@@ -72,6 +74,7 @@ struct ClipGridViewToolbar: View {
                 )
                 .frame(width: 200)
             }
+            .help("Filter clips by review status")
             
             // Sort menu
             Menu {
@@ -103,11 +106,13 @@ struct ClipGridViewToolbar: View {
                     Text("Sort")
                 }
             }
+            .help("Sort visible clips")
 
             if hasActiveFilters {
                 Button("Clear", action: clearFilters)
                     .buttonStyle(.borderless)
                     .font(.caption)
+                    .help("Clear active search and status filters")
             }
             
             // Clip count

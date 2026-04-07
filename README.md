@@ -84,6 +84,7 @@ This repo is intended to be the **canonical** Git root for SLATE (see `docs/inte
 ## Documentation
 
 - Shipping (desktop, web, iOS): `docs/SHIPPING_RUNBOOK.md` and `docs/RELEASE_CHECKLIST.md`
+- ASC MHL vendor compatibility matrix: `docs/ASC_MHL_VENDOR_ACCEPTANCE_MATRIX.md`
 - User-facing guide: `docs/USER_GUIDE.md`
 - Code signing & notarized release: `docs/code-signing.md` (see also `scripts/release-desktop.sh`)
 - NLE export QA checklist: `docs/EXPORT_NLE_VALIDATION.md`

@@ -16,19 +16,22 @@ public struct ScriptScene: Codable, Sendable, Equatable {
     public let pageNumber: Int
     public let characters: [String]
     public let synopsis: String?
+    public let dialogueLines: [String]
 
     public init(
         sceneNumber: String,
         slugline: String,
         pageNumber: Int,
         characters: [String],
-        synopsis: String?
+        synopsis: String?,
+        dialogueLines: [String] = []
     ) {
         self.sceneNumber = sceneNumber
         self.slugline = slugline
         self.pageNumber = pageNumber
         self.characters = characters
         self.synopsis = synopsis
+        self.dialogueLines = dialogueLines
     }
 }
 
@@ -289,6 +292,8 @@ private final class FDXScriptParser: NSObject, XMLParserDelegate {
     private var currentSceneNumber: String?
     private var currentCharacters: [String] = []
     private var currentSynopsis: String?
+    private var currentDialogueLines: [String] = []
+    private var currentCharacterName: String?
     private var wantsFirstAction = false
     /// Paragraph index (1-based line count) when the current scene’s heading paragraph ended.
     private var openedSceneAtParagraph = 0
@@ -356,6 +361,8 @@ private final class FDXScriptParser: NSObject, XMLParserDelegate {
                 }
                 currentCharacters = []
                 currentSynopsis = nil
+                currentDialogueLines = []
+                currentCharacterName = nil
                 wantsFirstAction = true
                 return
             }
@@ -373,8 +380,16 @@ private final class FDXScriptParser: NSObject, XMLParserDelegate {
                 if !trimmed.isEmpty, !currentCharacters.contains(trimmed) {
                     currentCharacters.append(trimmed)
                 }
+                currentCharacterName = trimmed.isEmpty ? nil : trimmed
             case ParagraphKind.dialogue.rawValue:
-                break
+                if !trimmed.isEmpty {
+                    let line = if let speaker = currentCharacterName, !speaker.isEmpty {
+                        "\(speaker): \(trimmed)"
+                    } else {
+                        trimmed
+                    }
+                    currentDialogueLines.append(line)
+                }
             default:
                 break
             }
@@ -390,13 +405,16 @@ private final class FDXScriptParser: NSObject, XMLParserDelegate {
             slugline: slug,
             pageNumber: page,
             characters: currentCharacters,
-            synopsis: currentSynopsis
+            synopsis: currentSynopsis,
+            dialogueLines: currentDialogueLines
         )
         scenes.append(scene)
         currentSlugline = nil
         currentSceneNumber = nil
         currentCharacters = []
         currentSynopsis = nil
+        currentDialogueLines = []
+        currentCharacterName = nil
         wantsFirstAction = false
     }
 }

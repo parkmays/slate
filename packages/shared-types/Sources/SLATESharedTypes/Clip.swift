@@ -713,6 +713,27 @@ public struct IngestProgressReport: Codable, Sendable {
 
 // MARK: - Watch folder config
 
+public enum OffloadDestinationRole: String, Codable, Sendable, Equatable, CaseIterable {
+    case landingZone
+    case cascade
+}
+
+public struct OffloadDestination: Codable, Sendable, Equatable {
+    public var path: String
+    public var role: OffloadDestinationRole
+    public var verificationRequired: Bool
+
+    public init(
+        path: String,
+        role: OffloadDestinationRole,
+        verificationRequired: Bool = true
+    ) {
+        self.path = path
+        self.role = role
+        self.verificationRequired = verificationRequired
+    }
+}
+
 public struct WatchFolder: Codable, Sendable, Equatable {
     public var path: String
     public var projectId: String
@@ -723,6 +744,8 @@ public struct WatchFolder: Codable, Sendable, Equatable {
     public var uploadThrottleBytesPerSecond: Int?
     /// Optional custom transcode profile for proxy generation.
     public var transcodeProfile: ProxyTranscodeProfile?
+    /// Optional offload routing destinations for verified cascading copies.
+    public var offloadDestinations: [OffloadDestination] = []
 
     public init(
         path: String,
@@ -730,7 +753,8 @@ public struct WatchFolder: Codable, Sendable, Equatable {
         mode: ProjectMode,
         burnInConfig: BurnInConfig? = nil,
         uploadThrottleBytesPerSecond: Int? = nil,
-        transcodeProfile: ProxyTranscodeProfile? = nil
+        transcodeProfile: ProxyTranscodeProfile? = nil,
+        offloadDestinations: [OffloadDestination] = []
     ) {
         self.path = path
         self.projectId = projectId
@@ -738,5 +762,6 @@ public struct WatchFolder: Codable, Sendable, Equatable {
         self.burnInConfig = burnInConfig
         self.uploadThrottleBytesPerSecond = uploadThrottleBytesPerSecond
         self.transcodeProfile = transcodeProfile
+        self.offloadDestinations = offloadDestinations
     }
 }

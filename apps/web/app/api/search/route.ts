@@ -17,18 +17,26 @@ export async function GET(request: NextRequest) {
     const shareLink = await requireShareLinkAccess(supabase, shareToken, request)
 
     const search = q.replace(/\s+/g, ' ').trim()
-    const { data, error } = await supabase
-      .from('review_search_documents')
-      .select('id, clip_id, source_type, source_id, time_offset_seconds, body, metadata')
-      .eq('project_id', shareLink.project_id)
-      .textSearch('body_tsv', search, { type: 'websearch', config: 'english' })
-      .limit(20)
+    const { data, error } = await supabase.rpc('search_review_documents_hybrid', {
+      p_project_id: shareLink.project_id,
+      p_query: search,
+      p_limit: 20,
+    })
 
     if (error) {
       throw new ReviewRouteError('Failed to run search', 500)
     }
 
-    const results = (data ?? []).map((row) => ({
+    const results = (data ?? []).map((row: {
+      id: string
+      clip_id: string | null
+      source_type: string
+      source_id: string
+      time_offset_seconds: number | null
+      body: string
+      metadata?: Record<string, unknown> | null
+      score?: number | null
+    }) => ({
       id: row.id,
       clipId: row.clip_id,
       sourceType: row.source_type,
@@ -36,6 +44,7 @@ export async function GET(request: NextRequest) {
       timeOffsetSeconds: row.time_offset_seconds,
       body: row.body,
       metadata: row.metadata ?? {},
+      score: row.score ?? null,
     }))
 
     return NextResponse.json({ results })

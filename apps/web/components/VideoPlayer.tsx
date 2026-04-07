@@ -345,15 +345,15 @@ export const VideoPlayer = React.forwardRef<any, VideoPlayerProps>(({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {/* Play/Pause */}
-            <Button variant="ghost" size="sm" onClick={togglePlay}>
+            <Button variant="ghost" size="sm" onClick={togglePlay} title="Play/Pause (K)">
               {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
             </Button>
             
             {/* Skip buttons */}
-            <Button variant="ghost" size="sm" onClick={() => skip(-10)}>
+            <Button variant="ghost" size="sm" onClick={() => skip(-10)} title="Back 10s (J)">
               <SkipBack className="w-4 h-4" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => skip(10)}>
+            <Button variant="ghost" size="sm" onClick={() => skip(10)} title="Forward 10s (L)">
               <SkipForward className="w-4 h-4" />
             </Button>
             
@@ -365,7 +365,7 @@ export const VideoPlayer = React.forwardRef<any, VideoPlayerProps>(({
           
           <div className="flex items-center gap-2">
             {/* Volume */}
-            <Button variant="ghost" size="sm" onClick={toggleMute}>
+            <Button variant="ghost" size="sm" onClick={toggleMute} title="Mute/unmute">
               {isMuted || volume === 0 ? (
                 <VolumeX className="w-4 h-4" />
               ) : (
@@ -391,6 +391,7 @@ export const VideoPlayer = React.forwardRef<any, VideoPlayerProps>(({
                 }
               }}
               className="bg-background border rounded px-2 py-1 text-sm"
+              title="Playback speed"
             >
               <option value={0.5}>0.5x</option>
               <option value={1}>1x</option>
@@ -399,7 +400,7 @@ export const VideoPlayer = React.forwardRef<any, VideoPlayerProps>(({
             </select>
             
             {/* Fullscreen */}
-            <Button variant="ghost" size="sm" onClick={toggleFullscreen}>
+            <Button variant="ghost" size="sm" onClick={toggleFullscreen} title="Fullscreen">
               <Maximize2 className="w-4 h-4" />
             </Button>
           </div>

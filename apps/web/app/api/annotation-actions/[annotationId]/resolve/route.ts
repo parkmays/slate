@@ -62,6 +62,17 @@ export async function POST(
       resolvedBy: 'share-token',
       isResolved,
     })
+    await broadcastClipEvent(supabase, annotationRow.clip_id, 'nle_marker_event', {
+      eventId: crypto.randomUUID(),
+      origin: 'web',
+      action: 'resolve',
+      clipId: annotationRow.clip_id,
+      annotationId: params.annotationId,
+      timecodeIn: null,
+      timeOffsetSeconds: null,
+      body: null,
+      sentAt: new Date().toISOString(),
+    })
 
     return NextResponse.json({ annotation })
   } catch (error) {

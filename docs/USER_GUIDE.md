@@ -74,6 +74,8 @@ sudo cp -r config /usr/local/etc/slate/
 
 ## Quick Start
 
+For prototype-showing prep, use the dedicated runbook at `docs/PROTOTYPE_DEMO_RUNBOOK.md`.
+
 ### Basic Synchronization
 
 Use the `**SLATESyncEngine**` and `**SLATEAIPipeline**` modules directly from the Swift packages under `packages/`. The snippet below is illustrative; see the package APIs for current types.
@@ -89,6 +91,8 @@ let syncEngine = SyncEngine()
 ### Command Line Usage
 
 There is no single `slate-engine` shim in this repository. Use the **Swift packages** from your own tool or the **macOS app** for end-user flows. For headless ingest, the `slate-ingest` product is built from `packages/ingest-daemon` (see that package’s CLI target). The commands below are **illustrative** of the kind of workflow the libraries support; wire `SyncEngine` and `SLATEAIPipeline` in code instead of these exact flags.
+
+For ASC MHL ingest/offload compatibility requirements and validation steps, see `docs/ASC_MHL_VENDOR_ACCEPTANCE_MATRIX.md`.
 
 ```bash
 # After building packages — conceptual example only (not installed as `slate-engine`):

@@ -27,6 +27,20 @@
             "reply": "AnnotationReply (see contracts/data-model.json if present) or opaque JSON from broadcaster"
           }
         },
+        "nle_marker_event": {
+          "description": "Canonical marker synchronization event between web review and NLE bridge/panels.",
+          "payload": {
+            "eventId": "string (idempotency key)",
+            "origin": "web|premiere|resolve|fcp|avid",
+            "action": "create|reply|resolve|update",
+            "clipId": "string (UUID)",
+            "annotationId": "string|null",
+            "timecodeIn": "string|null",
+            "timeOffsetSeconds": "number|null",
+            "body": "string|null",
+            "sentAt": "string (ISO 8601)"
+          }
+        },
         "review_status_changed": {
           "description": "The clip's reviewStatus was updated (circled, flagged, x, etc.).",
           "payload": {
@@ -59,6 +73,27 @@
             "clipId": "string (UUID)",
             "syncResult": "SyncResult (see contracts/data-model.json)",
             "syncedAudioPath": "string|null"
+          }
+        },
+        "presence_ping": {
+          "description": "Review presence heartbeat for active clip collaborators.",
+          "payload": {
+            "viewer": {
+              "id": "string",
+              "name": "string",
+              "activeAt": "string (ISO 8601)"
+            }
+          }
+        },
+        "watch_party_state": {
+          "description": "Host-controlled playback synchronization event for watch-party mode.",
+          "payload": {
+            "hostId": "string",
+            "viewerId": "string",
+            "kind": "play|pause|seek",
+            "currentTime": "number",
+            "isPlaying": "boolean",
+            "sentAt": "string (ISO 8601)"
           }
         }
       }

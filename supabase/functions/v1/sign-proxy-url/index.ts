@@ -10,6 +10,7 @@ const corsHeaders = {
 
 interface SignProxyUrlRequest {
   clipId: string
+  watermarkSessionId?: string
 }
 
 interface ShareLinkRecord {
@@ -214,7 +215,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     const body = await req.json() as SignProxyUrlRequest
-    const { clipId } = body
+    const { clipId, watermarkSessionId } = body
 
     if (!clipId) {
       return errorResponse(400, 'Missing clipId', 'missing_clip_id')
@@ -328,12 +329,19 @@ serve(async (req) => {
     // Thumbnail may not exist for every clip — sign optimistically, let the browser 404 gracefully
     const thumbnailUrl = await signObjectUrl(s3, thumbnailKey, expiresIn)
 
+    const watermarkToken = await sha256Hex(`${shareToken ?? 'crew'}:${clip.id}:${watermarkSessionId ?? 'default'}`)
+
     return jsonResponse({
       signedUrl,
       thumbnailUrl,
       expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
       proxyLUT: clip.proxy_lut ?? null,
       proxyColorSpace: clip.proxy_color_space ?? null,
+      watermark: {
+        token: watermarkToken,
+        sessionId: watermarkSessionId ?? 'default',
+        method: 'forensic_hook_v1',
+      },
     })
   } catch (error) {
     console.error('Error in sign-proxy-url:', error)

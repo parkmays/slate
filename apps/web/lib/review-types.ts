@@ -110,6 +110,32 @@ export interface ReviewTranscriptSegment {
   speaker: string | null
 }
 
+export interface ReviewFaceCluster {
+  id: string
+  clip_id: string
+  cluster_key: string
+  display_name: string | null
+  character_name: string | null
+  representative_thumbnail_url: string | null
+  metadata: Record<string, unknown>
+}
+
+export interface ScriptLineAnchor {
+  id: string
+  text: string
+  startSeconds: number
+  endSeconds: number
+}
+
+export interface ClipScriptContext {
+  scriptId: string
+  sceneNumber: string
+  sceneSlugline: string
+  confidence: number
+  mappingSource: string
+  lineAnchors: ScriptLineAnchor[]
+}
+
 export interface ReviewSyncResult {
   confidence: 'high' | 'medium' | 'low' | 'manual_required' | 'unsynced'
   method: string
@@ -167,6 +193,7 @@ export interface ReviewClip {
   transcriptText: string | null
   transcriptStatus: 'pending' | 'processing' | 'ready' | 'error'
   transcriptSegments: ReviewTranscriptSegment[]
+  scriptContext?: ClipScriptContext | null
   syncResult: ReviewSyncResult | null
   metadata: Record<string, unknown>
   aiProcessingStatus: 'pending' | 'processing' | 'ready' | 'error'

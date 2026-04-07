@@ -21,3 +21,7 @@ Use [`.cursor/agents/frame-io-parity-architect.md`](../.cursor/agents/frame-io-p
 1. Desktop: sign in, enable sync, open a project.
 2. Web: open share link, post annotation.
 3. Desktop: confirm notification-driven refresh or realtime updates for that clip/project.
+
+## Prototype showing runbook
+
+For the local-first prototype meeting flow and fallback script, see [`docs/PROTOTYPE_DEMO_RUNBOOK.md`](./PROTOTYPE_DEMO_RUNBOOK.md).

@@ -16,10 +16,11 @@
         "role": "viewer|commenter|editor (default: viewer)",
         "password": "string|null",
         "permissions": {
-          "canComment": "boolean",
-          "canFlag": "boolean",
-          "canRequestAlternate": "boolean"
-        }
+          "canComment": "boolean (advisory; server derives final permissions from role)",
+          "canFlag": "boolean (advisory; server derives final permissions from role)",
+          "canRequestAlternate": "boolean (advisory; server derives final permissions from role)"
+        },
+        "notes": "Role is authoritative for permission enforcement. Clients should send role and treat permissions as display hints."
       },
       "response": {
         "token": "string",

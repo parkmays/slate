@@ -1,8 +1,8 @@
 # SLATE Premiere UXP panel (spike)
 
-This folder is a **minimal UXP shell** for Phase 4. It documents the architecture split:
+This folder is a **minimal UXP shell** for live marker sync. It documents the architecture split:
 
-- **UXP panel (this spike):** HTML/JS UI, `fetch` to Supabase + SLATE web API, download proxies via signed R2 URLs from `supabase/functions/v1/sign-proxy-url`.
+- **UXP panel (this spike):** HTML/JS UI, realtime subscription to `clip:{clipId}` channels, and `fetch` to SLATE web APIs for annotation create/reply flows.
 - **Timeline automation:** Premiere’s classic **ExtendScript** DOM is **not** exposed to UXP. A production build should either:
   - **v1:** Download proxies to a folder and let the editor import manually, or
   - **v2:** Add a **CEP/ExtendScript** bridge panel to build sequences programmatically.
@@ -16,4 +16,5 @@ This folder is a **minimal UXP shell** for Phase 4. It documents the architectur
 ## Next steps
 
 - Bundle a thin client with `esbuild`/`vite` if you add React.
-- Reuse `apps/web` Supabase session patterns (PKCE) and API routes for assembly lists.
+- Replace `plotMarkerOnActiveSequence()` stub with host-specific timeline marker APIs.
+- Reuse `apps/web` Supabase session patterns (PKCE) for first-party auth flows.

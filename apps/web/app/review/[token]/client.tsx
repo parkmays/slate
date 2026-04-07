@@ -31,6 +31,7 @@ import {
   type ReviewAssemblyData,
   type ReviewAssemblyVersionDiff,
   type ReviewClip,
+  type ReviewFaceCluster,
   type ReviewPresenceUser,
   type ReviewProjectData,
   type ReviewShareLink,
@@ -38,7 +39,7 @@ import {
   type SpatialAnnotationPayload,
 } from '@/lib/review-types'
 import { secondsToTimecode, timecodeToSeconds } from '@/lib/timecode'
-import { cn } from '@/lib/utils'
+import { cn, storage } from '@/lib/utils'
 
 interface ReviewClientProps {
   shareLink: ReviewShareLink
@@ -47,6 +48,24 @@ interface ReviewClientProps {
   initialClipId?: string | null
   initialTimeSeconds?: number | null
 }
+
+type QuickActionId =
+  | 'copy-link'
+  | 'notes-tab'
+  | 'transcript-tab'
+  | 'toggle-shortcuts'
+  | 'take-host'
+  | 'walkthrough'
+
+const WALKTHROUGH_STORAGE_KEY = 'slate-review-walkthrough-v1'
+const QUICK_ACTIONS_STORAGE_KEY = 'slate-review-quick-actions-v1'
+const DEFAULT_QUICK_ACTIONS: QuickActionId[] = [
+  'copy-link',
+  'notes-tab',
+  'transcript-tab',
+  'toggle-shortcuts',
+  'walkthrough',
+]
 
 function annotationMatches(left: ReviewAnnotation, right: ReviewAnnotation): boolean {
   return (
@@ -133,6 +152,60 @@ function formatDuration(seconds: number): string {
   return `${mins}m ${String(secs).padStart(2, '0')}s`
 }
 
+function normalizeClusterToken(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function preferredClusterSpeakerName(cluster: ReviewFaceCluster): string | null {
+  const actor = cluster.display_name?.trim() ?? ''
+  const character = cluster.character_name?.trim() ?? ''
+  if (actor && character) {
+    return `${actor} (${character})`
+  }
+  return actor || character || null
+}
+
+function buildSpeakerNameMap(clusters: ReviewFaceCluster[]): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const cluster of clusters) {
+    const preferredName = preferredClusterSpeakerName(cluster)
+    if (!preferredName) {
+      continue
+    }
+
+    const candidateTokens = new Set<string>()
+    const clusterKey = cluster.cluster_key?.trim() ?? ''
+    if (clusterKey) {
+      candidateTokens.add(clusterKey)
+    }
+
+    const metadata = cluster.metadata ?? {}
+    const possibleArrays = [
+      metadata.speakerIds,
+      metadata.speaker_ids,
+      metadata.aliases,
+      metadata.labels,
+    ]
+
+    for (const value of possibleArrays) {
+      if (!Array.isArray(value)) {
+        continue
+      }
+      for (const token of value) {
+        if (typeof token === 'string' && token.trim()) {
+          candidateTokens.add(token)
+        }
+      }
+    }
+
+    for (const token of Array.from(candidateTokens)) {
+      map[token] = preferredName
+      map[normalizeClusterToken(token)] = preferredName
+    }
+  }
+  return map
+}
+
 function primaryVideoElement(): HTMLVideoElement | null {
   return document.querySelector('video[data-review-player="primary"]')
 }
@@ -149,6 +222,7 @@ function VideoPlayer({
   onPlaybackEvent,
   showShortcutOverlay = false,
   prefetchedStream,
+  watermarkSessionId,
   playerId = 'primary',
   muted = false,
 }: {
@@ -163,7 +237,12 @@ function VideoPlayer({
   onCreateSpatialAnnotation?: (payload: SpatialAnnotationPayload) => void
   onPlaybackEvent?: (payload: { kind: 'play' | 'pause' | 'seek'; currentTime: number; isPlaying: boolean }) => void
   showShortcutOverlay?: boolean
-  prefetchedStream?: { signedUrl: string; thumbnailUrl?: string | null } | null
+  prefetchedStream?: {
+    signedUrl: string
+    thumbnailUrl?: string | null
+    watermark?: { token?: string | null; sessionId?: string | null } | null
+  } | null
+  watermarkSessionId?: string
   playerId?: 'primary' | 'compare'
   muted?: boolean
 }) {
@@ -171,6 +250,7 @@ function VideoPlayer({
   const hlsRef = useRef<{ destroy: () => void } | null>(null)
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
+  const [watermarkToken, setWatermarkToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -181,6 +261,7 @@ function VideoPlayer({
       if (prefetchedStream?.signedUrl) {
         setSignedUrl(prefetchedStream.signedUrl)
         setThumbnailUrl(prefetchedStream.thumbnailUrl ?? null)
+        setWatermarkToken(prefetchedStream.watermark?.token ?? null)
         setLoading(false)
         return
       }
@@ -188,6 +269,7 @@ function VideoPlayer({
       setError(null)
       setSignedUrl(null)
       setThumbnailUrl(null)
+      setWatermarkToken(null)
 
       try {
         const response = await fetch('/api/proxy-url', {
@@ -196,7 +278,10 @@ function VideoPlayer({
             'Content-Type': 'application/json',
             'X-Share-Token': token,
           },
-          body: JSON.stringify({ clipId }),
+          body: JSON.stringify({
+            clipId,
+            watermarkSessionId,
+          }),
         })
 
         const payload = await response.json()
@@ -210,6 +295,7 @@ function VideoPlayer({
 
         setSignedUrl(payload.signedUrl)
         setThumbnailUrl(payload.thumbnailUrl ?? null)
+        setWatermarkToken(typeof payload?.watermark?.token === 'string' ? payload.watermark.token : null)
       } catch (loadError) {
         if (!isActive) {
           return
@@ -228,7 +314,7 @@ function VideoPlayer({
     return () => {
       isActive = false
     }
-  }, [clipId, token, prefetchedStream])
+  }, [clipId, token, prefetchedStream, watermarkSessionId])
 
   useEffect(() => {
     let isActive = true
@@ -314,6 +400,7 @@ function VideoPlayer({
       <video
         ref={videoRef}
         data-review-player={playerId}
+        data-watermark-token={watermarkToken ?? undefined}
         className="aspect-video w-full rounded-2xl"
         controls
         muted={muted}
@@ -571,6 +658,11 @@ export default function ReviewClient({
   const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set())
   const [presence, setPresence] = useState<Record<string, ReviewPresenceUser>>({})
   const [showSearchPalette, setShowSearchPalette] = useState(false)
+  const [showWalkthrough, setShowWalkthrough] = useState(false)
+  const [walkthroughStep, setWalkthroughStep] = useState(0)
+  const [showQuickActionsEditor, setShowQuickActionsEditor] = useState(false)
+  const [quickActions, setQuickActions] = useState<QuickActionId[]>(DEFAULT_QUICK_ACTIONS)
+  const [showShortcutOverlay, setShowShortcutOverlay] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Array<{
     id: string
@@ -579,9 +671,17 @@ export default function ReviewClient({
     sourceId: string
     timeOffsetSeconds: number | null
     body: string
+    score?: number | null
   }>>([])
   const [isSearching, setIsSearching] = useState(false)
-  const [prefetchedStreams, setPrefetchedStreams] = useState<Record<string, { signedUrl: string; thumbnailUrl?: string | null }>>({})
+  const [prefetchedStreams, setPrefetchedStreams] = useState<Record<string, {
+    signedUrl: string
+    thumbnailUrl?: string | null
+    watermark?: { token?: string | null; sessionId?: string | null } | null
+  }>>({})
+  const [faceClustersByClipId, setFaceClustersByClipId] = useState<Record<string, ReviewFaceCluster[]>>({})
+  const [faceClustersLoadingByClipId, setFaceClustersLoadingByClipId] = useState<Record<string, boolean>>({})
+  const [faceClusterErrorByClipId, setFaceClusterErrorByClipId] = useState<Record<string, string | null>>({})
   const [watchPartyHostId, setWatchPartyHostId] = useState<string | null>(null)
   const [watchPartyEnabled, setWatchPartyEnabled] = useState(true)
   const viewerIdRef = useRef(`reviewer-${crypto.randomUUID()}`)
@@ -589,6 +689,19 @@ export default function ReviewClient({
   const deepLinkAppliedRef = useRef(false)
   const activeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const suppressPlaybackBroadcastRef = useRef(false)
+
+  useEffect(() => {
+    const walkthroughState = storage.get(WALKTHROUGH_STORAGE_KEY) as { completed?: boolean } | null
+    if (!walkthroughState?.completed) {
+      setShowWalkthrough(true)
+      setWalkthroughStep(0)
+    }
+
+    const savedActions = storage.get(QUICK_ACTIONS_STORAGE_KEY) as QuickActionId[] | null
+    if (Array.isArray(savedActions) && savedActions.length > 0) {
+      setQuickActions(savedActions.filter((value) => DEFAULT_QUICK_ACTIONS.includes(value)))
+    }
+  }, [])
 
   const selectedClip = clips.find((clip) => clip.id === selectedClipId) ?? null
   const compareClip = useMemo(() => {
@@ -607,6 +720,103 @@ export default function ReviewClient({
       .sort((left, right) => left.name.localeCompare(right.name)),
     [presence]
   )
+  const selectedClipFaceClusters = useMemo(
+    () => (selectedClip ? faceClustersByClipId[selectedClip.id] ?? [] : []),
+    [faceClustersByClipId, selectedClip]
+  )
+  const selectedClipSpeakerNameMap = useMemo(
+    () => buildSpeakerNameMap(selectedClipFaceClusters),
+    [selectedClipFaceClusters]
+  )
+
+  useEffect(() => {
+    if (!selectedClip) {
+      return
+    }
+    const clipId = selectedClip.id
+    let cancelled = false
+
+    setFaceClustersLoadingByClipId((previous) => ({ ...previous, [clipId]: true }))
+    setFaceClusterErrorByClipId((previous) => ({ ...previous, [clipId]: null }))
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/face-clusters/${clipId}`, {
+          headers: {
+            'X-Share-Token': token,
+          },
+        })
+        const payload = await response.json()
+        if (!response.ok) {
+          throw new Error(payload.error ?? 'Failed to load cast clusters')
+        }
+        if (cancelled) {
+          return
+        }
+        const clusters = Array.isArray(payload.clusters)
+          ? payload.clusters as ReviewFaceCluster[]
+          : []
+        setFaceClustersByClipId((previous) => ({ ...previous, [clipId]: clusters }))
+      } catch (loadError) {
+        if (cancelled) {
+          return
+        }
+        setFaceClusterErrorByClipId((previous) => ({
+          ...previous,
+          [clipId]: loadError instanceof Error ? loadError.message : 'Failed to load cast clusters',
+        }))
+      } finally {
+        if (!cancelled) {
+          setFaceClustersLoadingByClipId((previous) => ({ ...previous, [clipId]: false }))
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedClip, token])
+
+  const handleSaveFaceCluster = useCallback(async (
+    cluster: ReviewFaceCluster,
+    displayName: string,
+    characterName: string
+  ) => {
+    if (!selectedClip) {
+      return
+    }
+
+    const response = await fetch(`/api/face-clusters/${selectedClip.id}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Share-Token': token,
+      },
+      body: JSON.stringify({
+        shareToken: token,
+        clusterKey: cluster.cluster_key,
+        displayName,
+        characterName,
+      }),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.cluster) {
+      throw new Error(payload.error ?? 'Failed to save cast label')
+    }
+
+    const updated = payload.cluster as ReviewFaceCluster
+    setFaceClustersByClipId((previous) => {
+      const prior = previous[selectedClip.id] ?? []
+      const next = prior.some((item) => item.id === updated.id || item.cluster_key === updated.cluster_key)
+        ? prior.map((item) => (
+            item.id === updated.id || item.cluster_key === updated.cluster_key
+              ? updated
+              : item
+          ))
+        : [...prior, updated]
+      return { ...previous, [selectedClip.id]: next }
+    })
+  }, [selectedClip, token])
 
   useEffect(() => {
     if (!selectedClip) {
@@ -629,7 +839,10 @@ export default function ReviewClient({
             'Content-Type': 'application/json',
             'X-Share-Token': token,
           },
-          body: JSON.stringify({ clipId: nextClip.id }),
+          body: JSON.stringify({
+            clipId: nextClip.id,
+            watermarkSessionId: viewerIdRef.current,
+          }),
         })
         const payload = await response.json()
         if (!response.ok || !payload?.signedUrl || cancelled) {
@@ -640,6 +853,11 @@ export default function ReviewClient({
           [nextClip.id]: {
             signedUrl: payload.signedUrl as string,
             thumbnailUrl: (payload.thumbnailUrl as string | null) ?? null,
+            watermark: (
+              typeof payload?.watermark === 'object' && payload?.watermark != null
+                ? payload.watermark as { token?: string | null; sessionId?: string | null }
+                : null
+            ),
           },
         }))
       } catch {
@@ -898,6 +1116,42 @@ export default function ReviewClient({
     })
   }, [initialClipId, initialTimeSeconds, projectData.clips, selectClip])
 
+  const walkthroughSteps = useMemo(() => ([
+    {
+      title: 'Clip Browser',
+      body: 'Use the left panel to search, filter, and select footage.',
+    },
+    {
+      title: 'Playback',
+      body: 'Use J/K/L to shuttle and Arrow keys to move between clips.',
+    },
+    {
+      title: 'Notes & Status',
+      body: 'Add annotations, mark status, and switch inspector tabs quickly.',
+    },
+    {
+      title: 'Quick Actions',
+      body: 'Pin your preferred controls in the quick-actions bar for live demos.',
+    },
+  ]), [])
+
+  const completeWalkthrough = useCallback(() => {
+    storage.set(WALKTHROUGH_STORAGE_KEY, { completed: true })
+    setShowWalkthrough(false)
+    setWalkthroughStep(0)
+  }, [])
+
+  const nextWalkthroughStep = useCallback(() => {
+    setWalkthroughStep((previous) => {
+      const next = previous + 1
+      if (next >= walkthroughSteps.length) {
+        completeWalkthrough()
+        return previous
+      }
+      return next
+    })
+  }, [completeWalkthrough, walkthroughSteps.length])
+
   const handleCopyLinkAtTime = useCallback(async () => {
     if (!selectedClip || typeof window === 'undefined') {
       return
@@ -911,6 +1165,62 @@ export default function ReviewClient({
       // Clipboard may be unavailable (permissions / non-secure context).
     }
   }, [selectedClip, token, currentTime])
+
+  const moveQuickAction = useCallback((index: number, delta: number) => {
+    setQuickActions((previous) => {
+      const nextIndex = index + delta
+      if (nextIndex < 0 || nextIndex >= previous.length) {
+        return previous
+      }
+      const clone = [...previous]
+      const [moved] = clone.splice(index, 1)
+      clone.splice(nextIndex, 0, moved)
+      storage.set(QUICK_ACTIONS_STORAGE_KEY, clone)
+      return clone
+    })
+  }, [])
+
+  const runQuickAction = useCallback((action: QuickActionId) => {
+    switch (action) {
+      case 'copy-link':
+        void handleCopyLinkAtTime()
+        break
+      case 'notes-tab':
+        setInspectorTab('notes')
+        break
+      case 'transcript-tab':
+        setInspectorTab('transcript')
+        break
+      case 'toggle-shortcuts':
+        setShowShortcutOverlay((value) => !value)
+        break
+      case 'take-host': {
+        const hostId = viewerIdRef.current
+        setWatchPartyHostId(hostId)
+        const video = primaryVideoElement()
+        const channel = activeChannelRef.current
+        if (video && channel) {
+          void channel.send({
+            type: 'broadcast',
+            event: 'watch_party_state',
+            payload: {
+              hostId,
+              viewerId: viewerIdRef.current,
+              kind: 'seek',
+              currentTime: video.currentTime,
+              isPlaying: !video.paused,
+              sentAt: new Date().toISOString(),
+            },
+          })
+        }
+        break
+      }
+      case 'walkthrough':
+        setShowWalkthrough(true)
+        setWalkthroughStep(0)
+        break
+    }
+  }, [handleCopyLinkAtTime])
 
   const handleSeek = useCallback((seconds: number) => {
     setCurrentTime(seconds)
@@ -1295,6 +1605,13 @@ export default function ReviewClient({
         return
       }
 
+      if (event.key === '?') {
+        event.preventDefault()
+        setShowWalkthrough(true)
+        setWalkthroughStep(0)
+        return
+      }
+
       if (event.key === 'j') {
         event.preventDefault()
         const video = primaryVideoElement()
@@ -1520,8 +1837,9 @@ export default function ReviewClient({
                           })
                         : undefined}
                       onPlaybackEvent={handlePlaybackEvent}
-                      showShortcutOverlay
+                      showShortcutOverlay={showShortcutOverlay}
                       prefetchedStream={prefetchedStreams[selectedClip.id] ?? null}
+                      watermarkSessionId={viewerIdRef.current}
                       playerId="primary"
                     />
                   </div>
@@ -1543,6 +1861,7 @@ export default function ReviewClient({
                       timecodeLabel={currentTimecode}
                       onPlaybackEvent={() => {}}
                       prefetchedStream={prefetchedStreams[compareClip.id] ?? null}
+                      watermarkSessionId={viewerIdRef.current}
                       playerId="compare"
                       muted
                     />
@@ -1563,21 +1882,48 @@ export default function ReviewClient({
                       })
                     : undefined}
                   onPlaybackEvent={handlePlaybackEvent}
-                  showShortcutOverlay
+                  showShortcutOverlay={showShortcutOverlay}
                   prefetchedStream={prefetchedStreams[selectedClip.id] ?? null}
+                  watermarkSessionId={viewerIdRef.current}
                   playerId="primary"
                 />
               )}
 
               <div className="mt-4 flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-3">
                 <span className="text-xs font-mono text-zinc-500">{currentTimecode}</span>
-                <button
-                  type="button"
-                  onClick={() => void handleCopyLinkAtTime()}
-                  className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800"
-                >
-                  Copy link at time
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {quickActions.map((action) => (
+                    <button
+                      key={action}
+                      type="button"
+                      onClick={() => runQuickAction(action)}
+                      title={
+                        action === 'copy-link' ? 'Copy link at current time' :
+                        action === 'notes-tab' ? 'Open Notes tab (N)' :
+                        action === 'transcript-tab' ? 'Open Transcript tab (T)' :
+                        action === 'toggle-shortcuts' ? 'Toggle shortcut legend' :
+                        action === 'take-host' ? 'Take watch-party host' :
+                        'Replay walkthrough (?)'
+                      }
+                      className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800"
+                    >
+                      {action === 'copy-link' ? 'Copy link' :
+                        action === 'notes-tab' ? 'Notes' :
+                        action === 'transcript-tab' ? 'Transcript' :
+                        action === 'toggle-shortcuts' ? (showShortcutOverlay ? 'Hide shortcuts' : 'Show shortcuts') :
+                        action === 'take-host' ? 'Take host' :
+                        'Walkthrough'}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickActionsEditor(true)}
+                    title="Customize quick actions"
+                    className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800"
+                  >
+                    Customize
+                  </button>
+                </div>
                 <div className="flex-1" />
                 <StatusBadge status={selectedClip.reviewStatus} />
               </div>
@@ -1610,12 +1956,14 @@ export default function ReviewClient({
                       <button
                         type="button"
                         onClick={() => setWatchPartyEnabled((v) => !v)}
+                        title={watchPartyEnabled ? 'Disable host-follow mode' : 'Enable host-follow mode'}
                         className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
                       >
                         {watchPartyEnabled ? 'Following host' : 'Local playback'}
                       </button>
                       <button
                         type="button"
+                        title="Broadcast your current playback as host"
                         onClick={() => {
                           const hostId = viewerIdRef.current
                           setWatchPartyHostId(hostId)
@@ -1694,6 +2042,14 @@ export default function ReviewClient({
                       key={value}
                       type="button"
                       onClick={() => setInspectorTab(value)}
+                      title={
+                        value === 'notes' ? 'Notes (N)' :
+                        value === 'transcript' ? 'Transcript (T)' :
+                        value === 'ai' ? 'AI Scores (I)' :
+                        value === 'cast' ? 'Cast (G)' :
+                        value === 'context' ? 'Context (M)' :
+                        'Ops (O)'
+                      }
                       className={cn(
                         'rounded-full px-3 py-1.5 text-sm transition-colors',
                         inspectorTab === value
@@ -1731,6 +2087,9 @@ export default function ReviewClient({
                     transcriptText={selectedClip.transcriptText}
                     transcriptStatus={selectedClip.transcriptStatus}
                     segments={selectedClip.transcriptSegments}
+                    speakerNameMap={selectedClipSpeakerNameMap}
+                    scriptContext={selectedClip.scriptContext ?? null}
+                    currentTimeSeconds={currentTime}
                     onSeek={handleSeek}
                   />
                 ) : null}
@@ -1747,7 +2106,12 @@ export default function ReviewClient({
                 ) : null}
 
                 {inspectorTab === 'cast' ? (
-                  <CastCharactersPanel token={token} clipId={selectedClip.id} />
+                  <CastCharactersPanel
+                    clusters={selectedClipFaceClusters}
+                    loading={Boolean(faceClustersLoadingByClipId[selectedClip.id])}
+                    error={faceClusterErrorByClipId[selectedClip.id] ?? null}
+                    onSave={handleSaveFaceCluster}
+                  />
                 ) : null}
 
                 {inspectorTab === 'ops' ? (
@@ -1769,6 +2133,94 @@ export default function ReviewClient({
           </div>
         )}
       </div>
+      {showWalkthrough ? (
+        <div className="absolute inset-0 z-40 flex items-start justify-end bg-black/40 p-6">
+          <div className="w-full max-w-sm rounded-2xl border border-zinc-700 bg-zinc-950 p-4 shadow-xl">
+            <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Prototype walkthrough</p>
+            <h3 className="mt-2 text-base font-semibold text-zinc-100">{walkthroughSteps[walkthroughStep]?.title}</h3>
+            <p className="mt-2 text-sm text-zinc-300">{walkthroughSteps[walkthroughStep]?.body}</p>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={completeWalkthrough}
+                className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900"
+              >
+                Skip
+              </button>
+              <div className="text-xs text-zinc-500">
+                Step {walkthroughStep + 1} of {walkthroughSteps.length}
+              </div>
+              <button
+                type="button"
+                onClick={nextWalkthroughStep}
+                className="rounded border border-zinc-700 bg-zinc-100 px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-200"
+              >
+                {walkthroughStep + 1 >= walkthroughSteps.length ? 'Done' : 'Next'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showQuickActionsEditor ? (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 p-6">
+          <div className="w-full max-w-lg rounded-xl border border-zinc-700 bg-zinc-950 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-zinc-100">Customize Quick Actions</h3>
+              <button
+                type="button"
+                onClick={() => setShowQuickActionsEditor(false)}
+                className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {quickActions.map((action, index) => (
+                <div key={`${action}-${index}`} className="flex items-center justify-between rounded border border-zinc-800 px-3 py-2">
+                  <span className="text-sm text-zinc-200">
+                    {action === 'copy-link' ? 'Copy link at time' :
+                      action === 'notes-tab' ? 'Open Notes tab' :
+                      action === 'transcript-tab' ? 'Open Transcript tab' :
+                      action === 'toggle-shortcuts' ? 'Toggle shortcuts legend' :
+                      action === 'take-host' ? 'Take host' :
+                      'Replay walkthrough'}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => moveQuickAction(index, -1)}
+                      className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                      disabled={index === 0}
+                    >
+                      Up
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveQuickAction(index, 1)}
+                      className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                      disabled={index === quickActions.length - 1}
+                    >
+                      Down
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickActions(DEFAULT_QUICK_ACTIONS)
+                  storage.set(QUICK_ACTIONS_STORAGE_KEY, DEFAULT_QUICK_ACTIONS)
+                }}
+                className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900"
+              >
+                Reset Defaults
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {showSearchPalette ? (
         <div className="absolute inset-0 z-50 flex items-start justify-center bg-black/50 p-6">
           <div className="w-full max-w-2xl rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-xl">

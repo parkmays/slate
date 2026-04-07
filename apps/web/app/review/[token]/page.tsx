@@ -13,6 +13,7 @@ import {
   normalizeAnnotationReply,
 } from '@/lib/review-server'
 import type {
+  ClipScriptContext,
   ReviewAIScores,
   ReviewAnnotation,
   ReviewAnnotationReply,
@@ -161,6 +162,85 @@ function buildTranscriptSegments(record: any, duration: number, fps: number): Re
   })
 }
 
+function buildScriptAnchorsFromTranscript(
+  transcriptSegments: ReviewClip['transcriptSegments'],
+  scriptDialogueLines: string[]
+): ClipScriptContext['lineAnchors'] {
+  if (scriptDialogueLines.length === 0) {
+    return transcriptSegments.slice(0, 24).map((segment) => ({
+      id: segment.id,
+      text: segment.text,
+      startSeconds: segment.startSeconds,
+      endSeconds: segment.endSeconds,
+    }))
+  }
+
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s]+/g, ' ')
+  const tokenize = (value: string) => normalize(value).split(/\s+/).filter((token) => token.length > 1)
+  const tokenOverlap = (left: string[], right: string[]) => {
+    if (left.length === 0 || right.length === 0) return 0
+    const leftSet = new Set(left)
+    const rightSet = new Set(right)
+    let intersection = 0
+    for (const token of Array.from(leftSet)) {
+      if (rightSet.has(token)) {
+        intersection += 1
+      }
+    }
+    const union = leftSet.size + rightSet.size - intersection
+    return union > 0 ? intersection / union : 0
+  }
+
+  const usedSegmentIds = new Set<string>()
+  const anchors: ClipScriptContext['lineAnchors'] = []
+  let fallbackIndex = 0
+
+  for (let i = 0; i < scriptDialogueLines.length; i += 1) {
+    const scriptLine = scriptDialogueLines[i]!
+    const scriptTokens = tokenize(scriptLine)
+    let bestScore = -1
+    let bestSegment: ReviewClip['transcriptSegments'][number] | null = null
+
+    for (const segment of transcriptSegments) {
+      if (usedSegmentIds.has(segment.id)) {
+        continue
+      }
+      const segmentTokens = tokenize(segment.text)
+      const overlap = tokenOverlap(scriptTokens, segmentTokens)
+      const containsBonus = normalize(segment.text).includes(normalize(scriptLine).trim()) ? 0.25 : 0
+      const score = overlap + containsBonus
+      if (score > bestScore) {
+        bestScore = score
+        bestSegment = segment
+      }
+    }
+
+    if (bestSegment && bestScore >= 0.18) {
+      usedSegmentIds.add(bestSegment.id)
+      anchors.push({
+        id: `script-line-${i + 1}`,
+        text: scriptLine,
+        startSeconds: bestSegment.startSeconds,
+        endSeconds: bestSegment.endSeconds,
+      })
+      continue
+    }
+
+    const fallback = transcriptSegments[fallbackIndex] ?? transcriptSegments[transcriptSegments.length - 1]
+    if (fallback) {
+      fallbackIndex = Math.min(fallbackIndex + 1, transcriptSegments.length - 1)
+      anchors.push({
+        id: `script-line-${i + 1}`,
+        text: scriptLine,
+        startSeconds: fallback.startSeconds,
+        endSeconds: fallback.endSeconds,
+      })
+    }
+  }
+
+  return anchors.slice(0, 24)
+}
+
 function normalizeAIScores(raw: any): ReviewAIScores | null {
   if (!raw) return null
 
@@ -187,7 +267,13 @@ function normalizeAIScores(raw: any): ReviewAIScores | null {
   }
 }
 
-function normalizeClip(record: any, projectMode: 'narrative' | 'documentary', annotations: ReviewAnnotation[]): ReviewClip {
+function normalizeClip(
+  record: any,
+  projectMode: 'narrative' | 'documentary',
+  annotations: ReviewAnnotation[],
+  scriptContextByClipId: Record<string, Omit<ClipScriptContext, 'lineAnchors'>>,
+  scriptDialogueLinesByClipId: Record<string, string[]>
+): ReviewClip {
   const hierarchy = record.hierarchy ?? {}
   const narrative = hierarchy.narrative
   const documentary = hierarchy.documentary
@@ -204,6 +290,18 @@ function normalizeClip(record: any, projectMode: 'narrative' | 'documentary', an
         return record.ai_scores || record.aiScores ? 'ready' : 'pending'
     }
   })()
+
+  const transcriptSegments = buildTranscriptSegments(record, duration, sourceFps)
+  const baseScriptContext = scriptContextByClipId[record.id]
+  const scriptContext = baseScriptContext
+    ? {
+        ...baseScriptContext,
+        lineAnchors: buildScriptAnchorsFromTranscript(
+          transcriptSegments,
+          scriptDialogueLinesByClipId[record.id] ?? []
+        ),
+      }
+    : null
 
   return {
     id: record.id,
@@ -233,7 +331,8 @@ function normalizeClip(record: any, projectMode: 'narrative' | 'documentary', an
     projectMode,
     transcriptText: record.transcription_text ?? null,
     transcriptStatus: normalizeTranscriptStatus(record.transcription_status),
-    transcriptSegments: buildTranscriptSegments(record, duration, sourceFps),
+    transcriptSegments,
+    scriptContext,
     syncResult: record.sync_confidence != null || record.sync_status
       ? {
           confidence: normalizeSyncConfidence(
@@ -297,6 +396,68 @@ async function getProjectData(shareLink: ReviewShareLink): Promise<ReviewProject
   const { data: clipRows } = await clipsQuery
   const scopedClipRows = await filterClipRowsForShareLink(supabase, shareLink, clipRows ?? [])
   const clipIds = scopedClipRows.map((clip) => clip.id)
+  const { data: mappingRows } = clipIds.length === 0
+    ? { data: [] as any[] }
+    : await supabase
+        .from('clip_script_mappings')
+        .select('clip_id, script_id, scene_number, confidence, mapping_source')
+        .in('clip_id', clipIds)
+
+  const scriptIds = Array.from(new Set((mappingRows ?? []).map((row) => row.script_id).filter(Boolean)))
+  const { data: scriptRows } = scriptIds.length === 0
+    ? { data: [] as any[] }
+    : await supabase
+        .from('scripts')
+        .select('id, scenes')
+        .in('id', scriptIds)
+
+  const sceneLookupByScriptId = (scriptRows ?? []).reduce((acc, row) => {
+    const sceneLookup: Record<string, { slugline: string; dialogueLines: string[] }> = {}
+    const scenes = Array.isArray(row.scenes) ? (row.scenes as Array<Record<string, unknown>>) : []
+    for (const scene of scenes) {
+      const sceneNumber = typeof scene.sceneNumber === 'string' ? scene.sceneNumber : null
+      if (!sceneNumber) {
+        continue
+      }
+      const dialogueLines = Array.isArray(scene.dialogueLines)
+        ? scene.dialogueLines.filter((line): line is string => typeof line === 'string' && line.trim().length > 0)
+        : []
+      sceneLookup[sceneNumber.toLowerCase()] = {
+        slugline: typeof scene.slugline === 'string' ? scene.slugline : `Scene ${sceneNumber}`,
+        dialogueLines,
+      }
+    }
+    acc[row.id] = sceneLookup
+    return acc
+  }, {} as Record<string, Record<string, { slugline: string; dialogueLines: string[] }>>)
+
+  const scriptContextByClipId = (mappingRows ?? []).reduce<Record<string, Omit<ClipScriptContext, 'lineAnchors'>>>((acc, row) => {
+    if (acc[row.clip_id]) {
+      return acc
+    }
+    const sceneNumber = typeof row.scene_number === 'string' ? row.scene_number : 'UNK'
+    const scriptSceneLookup = sceneLookupByScriptId[row.script_id] ?? {}
+    const sceneEntry = scriptSceneLookup[sceneNumber.toLowerCase()]
+    acc[row.clip_id] = {
+      scriptId: row.script_id,
+      sceneNumber,
+      sceneSlugline: sceneEntry?.slugline ?? `Scene ${sceneNumber}`,
+      confidence: Number(row.confidence ?? 0),
+      mappingSource: String(row.mapping_source ?? 'unknown'),
+    }
+    return acc
+  }, {})
+
+  const scriptDialogueLinesByClipId = (mappingRows ?? []).reduce<Record<string, string[]>>((acc, row) => {
+    if (acc[row.clip_id]) {
+      return acc
+    }
+    const sceneNumber = typeof row.scene_number === 'string' ? row.scene_number : ''
+    const scriptSceneLookup = sceneLookupByScriptId[row.script_id] ?? {}
+    const sceneEntry = scriptSceneLookup[sceneNumber.toLowerCase()]
+    acc[row.clip_id] = sceneEntry?.dialogueLines ?? []
+    return acc
+  }, {})
   const { data: annotationRows } = clipIds.length === 0
     ? { data: [] as any[] }
     : await supabase
@@ -337,7 +498,13 @@ async function getProjectData(shareLink: ReviewShareLink): Promise<ReviewProject
   }, {})
 
   const normalizedClips = (clipRows ?? []).map((row) =>
-    normalizeClip(row, shareLink.project.mode, annotationsByClip[row.id] ?? [])
+    normalizeClip(
+      row,
+      shareLink.project.mode,
+      annotationsByClip[row.id] ?? [],
+      scriptContextByClipId,
+      scriptDialogueLinesByClipId
+    )
   )
 
   const visibleClips = normalizedClips.filter((clip) =>

@@ -45,6 +45,7 @@ public enum IngestDaemonError: Error, LocalizedError {
     case unsupportedFormat(path: String)
     case noWatchFolder(path: String)
     case ingestPaused
+    case offloadFailed(path: String, message: String)
 
     public var errorDescription: String? {
         switch self {
@@ -56,6 +57,8 @@ public enum IngestDaemonError: Error, LocalizedError {
             return "No watch folder registered for \(path)"
         case .ingestPaused:
             return "Ingest is paused"
+        case .offloadFailed(let path, let message):
+            return "Verified offload failed for \(path): \(message)"
         }
     }
 }
@@ -118,6 +121,29 @@ public actor IngestPipeline {
         
         // Verify checksum already done above
         try await store.updateIngestQueueStage(id: queueItem.id, stage: .syncPending, startedAt: Date())
+
+        if !watchConfig.offloadDestinations.isEmpty {
+            report(filename: sourceURL.lastPathComponent, progress: 0.25, stage: .copy)
+            try await store.updateIngestQueueStage(id: queueItem.id, stage: .copying, startedAt: Date())
+            do {
+                try await performVerifiedOffloads(for: clip.id, sourceURL: sourceURL)
+            } catch {
+                try await store.updateIngestQueueStage(
+                    id: queueItem.id,
+                    stage: .failed,
+                    startedAt: Date(),
+                    error: error.localizedDescription
+                )
+                report(
+                    filename: sourceURL.lastPathComponent,
+                    progress: 1.0,
+                    stage: .error
+                )
+                throw IngestDaemonError.offloadFailed(path: sourceURL.path, message: error.localizedDescription)
+            }
+            report(filename: sourceURL.lastPathComponent, progress: 0.45, stage: .verify)
+            try await store.updateIngestQueueStage(id: queueItem.id, stage: .checksumming, startedAt: Date())
+        }
 
         // Stage 2: Sync
         report(filename: sourceURL.lastPathComponent, progress: 0.55, stage: .sync)
@@ -302,6 +328,65 @@ public actor IngestPipeline {
     private func sourceFileSize(at url: URL) throws -> Int64 {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return (attributes[.size] as? Int64) ?? 0
+    }
+
+    private func performVerifiedOffloads(for clipId: String, sourceURL: URL) async throws {
+        let orderedDestinations = orderedDestinationsForOffload(watchConfig.offloadDestinations)
+        guard !orderedDestinations.isEmpty else {
+            return
+        }
+
+        var cascadeSource = sourceURL
+        for destination in orderedDestinations {
+            let destinationURL = URL(fileURLWithPath: destination.path, isDirectory: true)
+                .appendingPathComponent(sourceURL.lastPathComponent)
+
+            var verification = try VerifiedCopyEngine.copyAndVerify(
+                from: cascadeSource,
+                to: destinationURL
+            )
+
+            if destination.verificationRequired {
+                let historyRootURL = URL(fileURLWithPath: destination.path, isDirectory: true)
+                let manifestURL = try MHLManifestWriter.write(
+                    for: verification,
+                    sourceURL: cascadeSource,
+                    destinationURL: destinationURL,
+                    historyRootURL: historyRootURL
+                )
+                verification = OffloadVerificationResult(
+                    sourcePath: verification.sourcePath,
+                    destinationPath: verification.destinationPath,
+                    algorithm: verification.algorithm,
+                    sourceHash: verification.sourceHash,
+                    destinationHash: verification.destinationHash,
+                    bytesCopied: verification.bytesCopied,
+                    verifiedAt: verification.verifiedAt,
+                    manifestPath: manifestURL.path
+                )
+            }
+
+            let record = GRDBStore.IngestVerificationRecord(
+                clipId: clipId,
+                sourcePath: verification.sourcePath,
+                destinationPath: verification.destinationPath,
+                hashAlgorithm: verification.algorithm.rawValue,
+                sourceHash: verification.sourceHash,
+                destinationHash: verification.destinationHash,
+                bytesCopied: verification.bytesCopied,
+                verifiedAt: verification.verifiedAt,
+                manifestPath: verification.manifestPath
+            )
+            try await store.saveIngestVerificationRecord(record)
+
+            cascadeSource = destinationURL
+        }
+    }
+
+    private func orderedDestinationsForOffload(_ destinations: [OffloadDestination]) -> [OffloadDestination] {
+        let landing = destinations.filter { $0.role == .landingZone }
+        let cascade = destinations.filter { $0.role == .cascade }
+        return landing + cascade
     }
 
     private func report(filename: String, progress: Double, stage: IngestStage) {

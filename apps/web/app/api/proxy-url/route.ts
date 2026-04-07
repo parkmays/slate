@@ -23,7 +23,7 @@ function anonKey(): string | null {
 
 export async function POST(request: NextRequest) {
   try {
-    const { clipId } = await request.json()
+    const { clipId, watermarkSessionId } = await request.json()
     const shareToken = request.headers.get('X-Share-Token')
     const baseUrl = edgeBaseUrl()
     const bearer = anonKey()
@@ -35,7 +35,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing share token' }, { status: 401 })
     }
     if (!baseUrl || !bearer) {
-      return NextResponse.json({ error: 'Supabase environment is not configured' }, { status: 500 })
+      return NextResponse.json(
+        {
+          error: 'Supabase environment is not configured. Use desktop local demo mode for prototype playback.',
+          code: 'local_demo_only',
+        },
+        { status: 500 }
+      )
     }
 
     const ip = getRequestClientIp(request)
@@ -57,7 +63,12 @@ export async function POST(request: NextRequest) {
         ...(reviewAccess ? { 'X-Review-Access': reviewAccess } : {}),
         Authorization: `Bearer ${bearer}`,
       },
-      body: JSON.stringify({ clipId }),
+      body: JSON.stringify({
+        clipId,
+        watermarkSessionId: typeof watermarkSessionId === 'string' && watermarkSessionId.trim().length > 0
+          ? watermarkSessionId
+          : crypto.randomUUID(),
+      }),
       cache: 'no-store',
     })
 

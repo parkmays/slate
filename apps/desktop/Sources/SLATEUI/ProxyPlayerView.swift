@@ -255,7 +255,7 @@ final class ProxyPlayerController: ObservableObject {
             // Supabase not yet configured — degrade gracefully rather than crashing.
             state = .error(
                 "Remote proxy streaming requires SLATE_SUPABASE_URL to be set.\n" +
-                "Locally transcoded proxies play without Supabase."
+                "Locally transcoded proxies play without Supabase. For prototype demos, import footage from demo-assets and run local-first."
             )
         } catch {
             state = .error(error.localizedDescription)

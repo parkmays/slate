@@ -12,6 +12,7 @@ import Foundation
 import VideoToolbox
 import GRDB
 import SLATESharedTypes
+import CryptoKit
 
 // Reader/writer objects are used only on their dedicated serial queues.
 private final class VideoEncodeState: @unchecked Sendable {
@@ -65,6 +66,14 @@ private final class AudioEncodeState: @unchecked Sendable {
 }
 
 public actor ProxyGenerator {
+    struct ForensicWatermarkHook: Codable, Sendable {
+        let clipId: String
+        let projectId: String
+        let seed: String
+        let generatedAt: String
+        let method: String
+    }
+
     private static func resolveProxyLUT(for clip: Clip) -> (ProxyLUT, URL?) {
         if clip.proxyLUT == "custom_cube", let path = clip.customProxyLUTPath, !path.isEmpty,
            FileManager.default.fileExists(atPath: path) {
@@ -386,6 +395,8 @@ public actor ProxyGenerator {
                 proxyColorSpace: proxyColorSpace
             )
 
+            try await writeForensicWatermarkHook(clip: clip, proxyURL: proxyURL)
+
             await uploadProxyToR2(
                 clip: clip,
                 proxyURL: proxyURL,
@@ -470,6 +481,22 @@ public actor ProxyGenerator {
                 ]
             )
         }
+    }
+
+    private func writeForensicWatermarkHook(clip: Clip, proxyURL: URL) async throws {
+        let seedInput = "\(clip.id):\(clip.projectId):\(Date().timeIntervalSince1970)"
+        let digest = SHA256.hash(data: Data(seedInput.utf8))
+        let seed = digest.map { String(format: "%02x", $0) }.joined()
+        let payload = ForensicWatermarkHook(
+            clipId: clip.id,
+            projectId: clip.projectId,
+            seed: seed,
+            generatedAt: ISO8601DateFormatter().string(from: Date()),
+            method: "hook_v1"
+        )
+        let sidecarURL = proxyURL.deletingPathExtension().appendingPathExtension("watermark.json")
+        let data = try JSONEncoder().encode(payload)
+        try data.write(to: sidecarURL, options: .atomic)
     }
     
     /// Uploads proxy MP4, HLS playlist, and thumbnail to Cloudflare R2. Failures are logged; local `ready` proxy remains valid.

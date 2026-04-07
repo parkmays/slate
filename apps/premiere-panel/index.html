@@ -8,14 +8,264 @@
       h1 { font-size: 14px; margin: 0 0 8px; }
       p { font-size: 12px; color: #aaa; line-height: 1.4; }
       code { background: #2a2a2a; padding: 2px 4px; border-radius: 3px; }
+      .row { display: grid; gap: 8px; margin-bottom: 10px; }
+      label { font-size: 11px; color: #bdbdbd; display: grid; gap: 4px; }
+      input, textarea { width: 100%; box-sizing: border-box; background: #111; color: #eee; border: 1px solid #333; border-radius: 6px; padding: 7px; font-size: 12px; }
+      textarea { min-height: 64px; resize: vertical; }
+      button { background: #2f5bff; color: white; border: none; border-radius: 6px; padding: 8px 10px; font-size: 12px; cursor: pointer; }
+      button.secondary { background: #2a2a2a; color: #ddd; }
+      .muted { color: #8d8d8d; font-size: 11px; }
+      .list { margin-top: 10px; border: 1px solid #333; border-radius: 8px; padding: 8px; max-height: 220px; overflow: auto; }
+      .item { border-bottom: 1px solid #2a2a2a; padding: 6px 0; font-size: 12px; }
+      .item:last-child { border-bottom: none; }
+      .status { font-size: 11px; color: #79d38f; margin-top: 4px; }
+      .error { color: #ff8f8f; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   </head>
   <body>
-    <h1>SLATE — Premiere spike</h1>
-    <p>
-      v1: authenticate against Supabase (PKCE), list assemblies via your web API, and download proxies using
-      <code>sign-proxy-url</code>. Timeline placement requires ExtendScript/CEP or Adobe’s supported automation — not UXP DOM.
+    <h1>SLATE — Live Marker Sync</h1>
+    <p class="muted">
+      Subscribes to clip realtime events and maps incoming annotation events to timeline markers.
+      Replies created here are posted back into the web thread model.
     </p>
-    <p>Wire <code>@supabase/supabase-js</code> via a small bundle step before shipping.</p>
+
+    <div class="row">
+      <label>Web Base URL
+        <input id="webBaseUrl" value="http://localhost:3000" />
+      </label>
+      <label>Supabase URL
+        <input id="supabaseUrl" />
+      </label>
+      <label>Supabase Anon Key
+        <input id="supabaseKey" />
+      </label>
+      <label>Share Token
+        <input id="shareToken" />
+      </label>
+      <label>Clip ID
+        <input id="clipId" />
+      </label>
+      <div style="display:flex;gap:8px;">
+        <button id="connectBtn">Connect Realtime</button>
+        <button id="disconnectBtn" class="secondary">Disconnect</button>
+      </div>
+      <div id="status" class="status">Idle</div>
+    </div>
+
+    <div class="row">
+      <label>New Note (posts to web annotations API)
+        <textarea id="noteBody" placeholder="Type marker note from Premiere panel..."></textarea>
+      </label>
+      <label>Timecode In (HH:MM:SS:FF)
+        <input id="timecodeIn" value="00:00:00:00" />
+      </label>
+      <button id="postNoteBtn">Post Note to Web Thread</button>
+    </div>
+
+    <div class="list" id="events"></div>
+
+    <script>
+      const lsKey = 'slate-premiere-panel-config-v1';
+      let supabaseClient = null;
+      let realtimeChannel = null;
+      let pproModule = null;
+
+      const $ = (id) => document.getElementById(id);
+      const statusEl = $('status');
+      const eventsEl = $('events');
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message;
+        statusEl.className = isError ? 'status error' : 'status';
+      }
+
+      function pushEvent(line) {
+        const el = document.createElement('div');
+        el.className = 'item';
+        el.textContent = `${new Date().toLocaleTimeString()} — ${line}`;
+        eventsEl.prepend(el);
+      }
+
+      function getPremiereModule() {
+        if (pproModule) return pproModule;
+        try {
+          // UXP Premiere APIs
+          // eslint-disable-next-line no-undef
+          pproModule = require("premierepro");
+          return pproModule;
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function parseTimecodeToSeconds(timecode) {
+        const parts = String(timecode || '00:00:00:00').split(':').map((v) => Number.parseInt(v, 10) || 0);
+        if (parts.length !== 4) return 0;
+        const [hh, mm, ss, ff] = parts;
+        // Default to 24fps when frame rate is unknown in-panel.
+        return hh * 3600 + mm * 60 + ss + ff / 24;
+      }
+
+      function tryInsertPremiereMarker(annotation) {
+        const ppro = getPremiereModule();
+        if (!ppro) {
+          pushEvent('[Marker Stub] premierepro module unavailable in host runtime');
+          return false;
+        }
+
+        try {
+          const project = ppro.Project.getActiveProject();
+          if (!project) {
+            pushEvent('[Marker Stub] no active Premiere project');
+            return false;
+          }
+          const sequence = project.getActiveSequence();
+          if (!sequence) {
+            pushEvent('[Marker Stub] no active sequence');
+            return false;
+          }
+
+          const markers = ppro.Markers.getMarkers(sequence);
+          const startSeconds = typeof annotation.timeOffsetSeconds === 'number'
+            ? annotation.timeOffsetSeconds
+            : parseTimecodeToSeconds(annotation.timecodeIn);
+          const start = ppro.TickTime.createWithSeconds(startSeconds);
+          const duration = ppro.TickTime.createWithSeconds(1.0);
+          const name = (annotation.userDisplayName ? `${annotation.userDisplayName}: ` : '') + (annotation.body || 'SLATE note');
+          const action = markers.createAddMarkerAction(
+            name.slice(0, 200),
+            'Comment',
+            start,
+            duration,
+            annotation.body || ''
+          );
+          project.executeTransaction((compoundAction) => {
+            compoundAction.addAction(action);
+          }, 'SLATE Live Marker Sync');
+          return true;
+        } catch (error) {
+          pushEvent(`[Marker Error] ${String(error)}`);
+          return false;
+        }
+      }
+
+      function readConfig() {
+        return {
+          webBaseUrl: $('webBaseUrl').value.trim(),
+          supabaseUrl: $('supabaseUrl').value.trim(),
+          supabaseKey: $('supabaseKey').value.trim(),
+          shareToken: $('shareToken').value.trim(),
+          clipId: $('clipId').value.trim(),
+        };
+      }
+
+      function saveConfig() {
+        localStorage.setItem(lsKey, JSON.stringify(readConfig()));
+      }
+
+      function restoreConfig() {
+        try {
+          const raw = localStorage.getItem(lsKey);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          ['webBaseUrl', 'supabaseUrl', 'supabaseKey', 'shareToken', 'clipId'].forEach((key) => {
+            if (typeof parsed[key] === 'string' && $(key)) $(key).value = parsed[key];
+          });
+        } catch (_) {}
+      }
+
+      function plotMarkerOnActiveSequence(annotation) {
+        const summary = `[Marker] ${annotation.timecodeIn || '00:00:00:00'} ${annotation.body || '(drawing annotation)'}`;
+        const inserted = tryInsertPremiereMarker(annotation);
+        pushEvent(inserted ? `${summary} (inserted)` : `${summary} (not inserted)`);
+      }
+
+      async function connectRealtime() {
+        saveConfig();
+        const config = readConfig();
+        if (!config.supabaseUrl || !config.supabaseKey || !config.clipId) {
+          setStatus('Missing supabase URL/key or clip ID', true);
+          return;
+        }
+
+        if (!window.supabase || !window.supabase.createClient) {
+          setStatus('Supabase SDK failed to load', true);
+          return;
+        }
+
+        if (!supabaseClient) {
+          supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseKey);
+        }
+        if (realtimeChannel) {
+          await supabaseClient.removeChannel(realtimeChannel);
+          realtimeChannel = null;
+        }
+
+        realtimeChannel = supabaseClient
+          .channel(`clip:${config.clipId}`)
+          .on('broadcast', { event: 'annotation_added' }, ({ payload }) => {
+            const annotation = payload && payload.annotation ? payload.annotation : null;
+            if (!annotation) return;
+            plotMarkerOnActiveSequence(annotation);
+          })
+          .on('broadcast', { event: 'nle_marker_event' }, ({ payload }) => {
+            if (!payload) return;
+            pushEvent(`[NLE Event] ${payload.action || 'unknown'} ${payload.body || ''}`.trim());
+          })
+          .on('broadcast', { event: 'annotation_reply_added' }, ({ payload }) => {
+            if (!payload || !payload.reply) return;
+            pushEvent(`[Reply] ${payload.reply.body || ''}`);
+          })
+          .subscribe((state) => setStatus(`Realtime: ${state}`));
+      }
+
+      async function disconnectRealtime() {
+        if (supabaseClient && realtimeChannel) {
+          await supabaseClient.removeChannel(realtimeChannel);
+          realtimeChannel = null;
+        }
+        setStatus('Disconnected');
+      }
+
+      async function postNote() {
+        saveConfig();
+        const config = readConfig();
+        const noteBody = $('noteBody').value.trim();
+        const timecodeIn = $('timecodeIn').value.trim();
+        if (!config.webBaseUrl || !config.shareToken || !config.clipId || !noteBody) {
+          setStatus('Missing web URL/share token/clip ID/note', true);
+          return;
+        }
+
+        const response = await fetch(`${config.webBaseUrl}/api/annotations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Share-Token': config.shareToken,
+          },
+          body: JSON.stringify({
+            clipId: config.clipId,
+            timecodeIn: timecodeIn || '00:00:00:00',
+            body: noteBody,
+            type: 'text',
+            shareToken: config.shareToken,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setStatus(`Post failed: ${payload.error || response.statusText}`, true);
+          return;
+        }
+        $('noteBody').value = '';
+        pushEvent('[Outbound] note posted from panel');
+        setStatus('Note posted');
+      }
+
+      $('connectBtn').addEventListener('click', () => { void connectRealtime(); });
+      $('disconnectBtn').addEventListener('click', () => { void disconnectRealtime(); });
+      $('postNoteBtn').addEventListener('click', () => { void postNote(); });
+      restoreConfig();
+    </script>
   </body>
 </html>

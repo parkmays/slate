@@ -184,7 +184,10 @@ serve(async (req) => {
       return errorResponse(500, 'Failed to create share link', 'share_link_insert_failed')
     }
 
-    const reviewUrl = `${req.headers.get('origin') || 'https://slate.app'}/review/${token}`
+    const reviewBaseUrl = Deno.env.get('SLATE_REVIEW_APP_URL')
+      ?? req.headers.get('origin')
+      ?? 'https://slate.app'
+    const reviewUrl = `${reviewBaseUrl.replace(/\/+$/, '')}/review/${token}`
 
     // Fire-and-forget notification if notifyEmail is provided
     if (notifyEmail) {

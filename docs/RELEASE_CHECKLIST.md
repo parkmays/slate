@@ -28,6 +28,7 @@ Use per release train. Check boxes as you complete each step.
 
 - [ ] `bash scripts/build-root-swift.sh release` (or CI parity).
 - [ ] `bash scripts/build-desktop-app.sh --release` (unsigned OK for internal).
+- [ ] ASC MHL acceptance checks reviewed for offload/verification releases (see [`docs/ASC_MHL_VENDOR_ACCEPTANCE_MATRIX.md`](ASC_MHL_VENDOR_ACCEPTANCE_MATRIX.md)).
 - [ ] For external distribution: `bash scripts/release-desktop.sh --release` with signing/notary env (see [`docs/code-signing.md`](code-signing.md)).
 - [ ] DMG smoke test; `spctl` / Gatekeeper as needed.
 - [ ] Checksum or hosting URL for download page updated.

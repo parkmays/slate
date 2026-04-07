@@ -33,6 +33,9 @@ public struct ContentView: View {
     @State private var showingProductionSyncSheet = false
     @State private var isImportingMedia = false
     @State private var importNotice: String?
+    @State private var walkthroughStep: WalkthroughStep?
+    @State private var toolbarActions: [ToolbarActionID]
+    @AppStorage("SLATE.walkthrough.completed.v1") private var walkthroughCompleted = false
 
     public init() {
         let dbPath = GRDBClipStore.defaultDBPath()
@@ -41,6 +44,7 @@ public struct ContentView: View {
         _syncManager  = StateObject(wrappedValue: SyncManager())
         _cloudSyncStore = StateObject(wrappedValue: CloudSyncStore(dbPath: dbPath))
         _cloudAuthManager = StateObject(wrappedValue: CloudAuthManager())
+        _toolbarActions = State(initialValue: ToolbarCustomizationStore.load())
     }
 
     public var body: some View {
@@ -63,13 +67,16 @@ public struct ContentView: View {
                 isConnected: syncManager.isConnected,
                 hasSelectedProject: hasSelectedProject,
                 hasSelectedClip: selectedClip != nil,
+                toolbarActions: toolbarActions,
                 showIngestProgress: { showingIngestProgress = true },
                 showShareSheet: { showingShareSheet = true },
                 showAssemblySheet: { showingAssemblySheet = true },
                 showCloudSyncSheet: { showingCloudSyncSheet = true },
                 showColorSheet: { showingColorSheet = true },
                 showProductionSyncSheet: { showingProductionSyncSheet = true },
-                showNewProjectSheet: { appState.showNewProjectSheet = true }
+                showNewProjectSheet: { appState.showNewProjectSheet = true },
+                showWalkthrough: startWalkthrough,
+                showToolbarCustomization: { appState.showToolbarCustomizationSheet = true }
             )
         }
         .sheet(isPresented: $appState.showNewProjectSheet) {
@@ -114,6 +121,12 @@ public struct ContentView: View {
                 ProductionSyncSheet(project: project, projectStore: projectStore, clipStore: clipStore)
             }
         }
+        .sheet(isPresented: $appState.showToolbarCustomizationSheet) {
+            ToolbarCustomizationSheet(actions: $toolbarActions) {
+                appState.showToolbarCustomizationSheet = false
+                ToolbarCustomizationStore.save(toolbarActions)
+            }
+        }
         .alert(
             "Import Notice",
             isPresented: Binding(
@@ -125,27 +138,21 @@ public struct ContentView: View {
         } message: {
             Text(importNotice ?? "")
         }
+        .overlay(alignment: .topTrailing) {
+            if let walkthroughStep {
+                WalkthroughOverlayCard(
+                    step: walkthroughStep,
+                    totalSteps: WalkthroughStep.allCases.count,
+                    onNext: advanceWalkthrough,
+                    onSkip: dismissWalkthrough,
+                    onDone: completeWalkthrough
+                )
+                .padding(.top, 14)
+                .padding(.trailing, 14)
+            }
+        }
         .onReceive(clipStore.$projects) { projects in
-            projectStore.setProjects(projects)
-            let selectedId = appState.selectedProject?.id
-            if let selectedId {
-                let refreshed = projects.first { $0.id == selectedId }
-                if let refreshed {
-                    appState.selectedProject = refreshed
-                }
-            }
-            if appState.selectedProject == nil {
-                appState.selectedProject = projectStore.activeProject
-                if let project = projectStore.activeProject {
-                    Task {
-                        await clipStore.selectProject(project)
-                    }
-                }
-            }
-            let store = clipStore
-            Task {
-                await ContentView.rescheduleDailyDigests(projects: projects, clipStore: store)
-            }
+            handleProjectsUpdate(projects)
         }
         .onReceive(clipStore.$clips) { clips in
             syncSelectedClip(with: clips)
@@ -192,6 +199,17 @@ public struct ContentView: View {
                     selectedClip = clip
                 }
             }
+        }
+        .onAppear {
+            if !walkthroughCompleted && walkthroughStep == nil {
+                startWalkthrough()
+            }
+        }
+        .onChange(of: appState.walkthroughReplayNonce) {
+            startWalkthrough()
+        }
+        .onChange(of: toolbarActions) {
+            ToolbarCustomizationStore.save(toolbarActions)
         }
     }
 
@@ -280,6 +298,14 @@ public struct ContentView: View {
                 systemImage: "wifi.slash",
                 dismiss: nil
             )
+        } else if ProcessInfo.processInfo.environment["SLATE_DEMO_LOCAL_MODE"] == "1" {
+            AppStatusBanner(
+                title: "Prototype Local Demo Mode",
+                message: "Cloud routes are optional in this session. Use local footage under demo-assets for deterministic playback.",
+                tint: .blue,
+                systemImage: "play.circle",
+                dismiss: nil
+            )
         }
     }
 
@@ -332,6 +358,56 @@ public struct ContentView: View {
         }
     }
 
+    private func handleProjectsUpdate(_ projects: [Project]) {
+        projectStore.setProjects(projects)
+        let selectedId = appState.selectedProject?.id
+        if let selectedId {
+            let refreshed = projects.first { $0.id == selectedId }
+            if let refreshed {
+                appState.selectedProject = refreshed
+            }
+        }
+        let selectedProjectIsNil = appState.selectedProject == nil
+        if selectedProjectIsNil {
+            appState.selectedProject = projectStore.activeProject
+            if let project = projectStore.activeProject {
+                Task {
+                    await clipStore.selectProject(project)
+                }
+            }
+        }
+        let store = clipStore
+        Task {
+            await ContentView.rescheduleDailyDigests(projects: projects, clipStore: store)
+        }
+    }
+
+    private func startWalkthrough() {
+        walkthroughStep = .welcome
+    }
+
+    private func advanceWalkthrough() {
+        guard let current = walkthroughStep else {
+            walkthroughStep = .welcome
+            return
+        }
+        let nextRaw = current.rawValue + 1
+        guard let next = WalkthroughStep(rawValue: nextRaw) else {
+            completeWalkthrough()
+            return
+        }
+        walkthroughStep = next
+    }
+
+    private func dismissWalkthrough() {
+        walkthroughStep = nil
+    }
+
+    private func completeWalkthrough() {
+        walkthroughCompleted = true
+        walkthroughStep = nil
+    }
+
     private static func rescheduleDailyDigests(projects: [Project], clipStore: GRDBClipStore) async {
         for p in projects {
             if p.dailyDigestEnabled, !p.digestTargets.isEmpty {
@@ -347,6 +423,7 @@ private struct ContentToolbar: ToolbarContent {
     let isConnected: Bool
     let hasSelectedProject: Bool
     let hasSelectedClip: Bool
+    let toolbarActions: [ToolbarActionID]
     let showIngestProgress: () -> Void
     let showShareSheet: () -> Void
     let showAssemblySheet: () -> Void
@@ -354,57 +431,84 @@ private struct ContentToolbar: ToolbarContent {
     let showColorSheet: () -> Void
     let showProductionSyncSheet: () -> Void
     let showNewProjectSheet: () -> Void
+    let showWalkthrough: () -> Void
+    let showToolbarCustomization: () -> Void
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             ConnectionStatusView(isConnected: isConnected)
         }
+        ToolbarItemGroup(placement: .primaryAction) {
+            ForEach(toolbarActions, id: \.self) { action in
+                toolbarButton(for: action)
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
+            Button(action: showWalkthrough) {
+                Image(systemName: "questionmark.circle")
+            }
+            .help("Replay Walkthrough (Command+Shift+W)")
+            .keyboardShortcut("w", modifiers: [.command, .shift])
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button(action: showToolbarCustomization) {
+                Image(systemName: "slider.horizontal.3")
+            }
+            .help("Customize Toolbar (Command+Shift+T)")
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+        }
+    }
+
+    @ViewBuilder
+    private func toolbarButton(for action: ToolbarActionID) -> some View {
+        switch action {
+        case .ingest:
             Button(action: showIngestProgress) {
                 Image(systemName: "arrow.down.circle")
             }
-            .help("Ingest Progress")
-        }
-        ToolbarItem(placement: .primaryAction) {
+            .help("Ingest Progress (Command+I)")
+            .keyboardShortcut("i", modifiers: .command)
+        case .share:
             Button(action: showShareSheet) {
                 Image(systemName: "square.and.arrow.up")
             }
-            .help(hasSelectedProject ? "Share Project" : "Select a project to share")
+            .help(hasSelectedProject ? "Share Project (Command+Shift+S)" : "Select a project to share")
+            .keyboardShortcut("s", modifiers: [.command, .shift])
             .disabled(!hasSelectedProject)
-        }
-        ToolbarItem(placement: .primaryAction) {
+        case .assembly:
             Button(action: showAssemblySheet) {
                 Image(systemName: "film.stack")
             }
-            .help(hasSelectedProject ? "Open Assembly Workspace" : "Select a project to build an assembly")
+            .help(hasSelectedProject ? "Open Assembly Workspace (Command+Shift+A)" : "Select a project to build an assembly")
+            .keyboardShortcut("a", modifiers: [.command, .shift])
             .disabled(!hasSelectedProject)
-        }
-        ToolbarItem(placement: .primaryAction) {
+        case .cloudSync:
             Button(action: showCloudSyncSheet) {
                 Image(systemName: "icloud.and.arrow.up")
             }
-            .help(hasSelectedProject ? "Open Cloud Sync" : "Select a project to configure cloud sync")
+            .help(hasSelectedProject ? "Open Cloud Sync (Command+Shift+C)" : "Select a project to configure cloud sync")
+            .keyboardShortcut("c", modifiers: [.command, .shift])
             .disabled(!hasSelectedProject)
-        }
-        ToolbarItem(placement: .primaryAction) {
+        case .productionSync:
             Button(action: showProductionSyncSheet) {
                 Image(systemName: "link")
             }
-            .help(hasSelectedProject ? "Production Sync (Airtable / ShotGrid)" : "Select a project")
+            .help(hasSelectedProject ? "Production Sync (Command+Shift+P)" : "Select a project")
+            .keyboardShortcut("p", modifiers: [.command, .shift])
             .disabled(!hasSelectedProject)
-        }
-        ToolbarItem(placement: .primaryAction) {
+        case .color:
             Button(action: showColorSheet) {
                 Image(systemName: "cube.transparent")
             }
-            .help(hasSelectedClip ? "Custom proxy LUT (.cube) for selected clip" : "Select a clip to set a custom LUT")
+            .help(hasSelectedClip ? "Custom proxy LUT for selected clip (Command+Shift+L)" : "Select a clip to set a custom LUT")
+            .keyboardShortcut("l", modifiers: [.command, .shift])
             .disabled(!hasSelectedProject || !hasSelectedClip)
-        }
-        ToolbarItem(placement: .primaryAction) {
+        case .newProject:
             Button(action: showNewProjectSheet) {
                 Image(systemName: "plus")
             }
-            .help("New Project")
+            .help("New Project (Command+N)")
+            .keyboardShortcut("n", modifiers: .command)
         }
     }
 }

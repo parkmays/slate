@@ -115,7 +115,7 @@ public actor GRDBStore {
                         airtable_record_id, shotgrid_entity_id, editorial_updated_at,
                         custom_proxy_lut_path
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         project_id = excluded.project_id,
                         checksum = excluded.checksum,
@@ -411,14 +411,18 @@ public actor GRDBStore {
         try await queue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO watch_folders (path, project_id, mode, burn_in_config, upload_throttle_bps, transcode_profile, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO watch_folders (
+                        path, project_id, mode, burn_in_config,
+                        upload_throttle_bps, transcode_profile, offload_destinations, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(path) DO UPDATE SET
                         project_id = excluded.project_id,
                         mode = excluded.mode,
                         burn_in_config = excluded.burn_in_config,
                         upload_throttle_bps = excluded.upload_throttle_bps,
-                        transcode_profile = excluded.transcode_profile
+                        transcode_profile = excluded.transcode_profile,
+                        offload_destinations = excluded.offload_destinations
                 """,
                 arguments: [
                     watchFolder.path,
@@ -427,6 +431,7 @@ public actor GRDBStore {
                     try Self.encodeJSON(watchFolder.burnInConfig),
                     watchFolder.uploadThrottleBytesPerSecond,
                     try Self.encodeJSON(watchFolder.transcodeProfile),
+                    try Self.encodeJSON(watchFolder.offloadDestinations) ?? "[]",
                     createdAt
                 ]
             )
@@ -439,7 +444,7 @@ public actor GRDBStore {
             let rows = try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT path, project_id, mode, burn_in_config, upload_throttle_bps, transcode_profile
+                    SELECT path, project_id, mode, burn_in_config, upload_throttle_bps, transcode_profile, offload_destinations
                     FROM watch_folders
                     ORDER BY created_at ASC
                 """
@@ -600,6 +605,9 @@ public actor GRDBStore {
         if !watchFolderColumns.contains("transcode_profile") {
             try db.execute(sql: "ALTER TABLE watch_folders ADD COLUMN transcode_profile TEXT")
         }
+        if !watchFolderColumns.contains("offload_destinations") {
+            try db.execute(sql: "ALTER TABLE watch_folders ADD COLUMN offload_destinations TEXT DEFAULT '[]'")
+        }
 
         try db.execute(sql: """
             CREATE TABLE IF NOT EXISTS assemblies (
@@ -675,6 +683,40 @@ public actor GRDBStore {
         """)
 
         try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_scripts_project_id ON scripts(project_id)")
+
+        try db.execute(sql: """
+            CREATE TABLE IF NOT EXISTS ingest_verification_records (
+                id TEXT PRIMARY KEY NOT NULL,
+                clip_id TEXT NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+                source_path TEXT NOT NULL,
+                destination_path TEXT NOT NULL,
+                hash_algorithm TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                destination_hash TEXT NOT NULL,
+                bytes_copied INTEGER NOT NULL,
+                verified_at TEXT NOT NULL,
+                manifest_path TEXT,
+                sync_status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_retry_at REAL,
+                last_error TEXT
+            )
+        """)
+        let verificationColumns = Set(try Row.fetchAll(db, sql: "PRAGMA table_info(ingest_verification_records)").compactMap { row in
+            row["name"] as String?
+        })
+        if !verificationColumns.contains("attempts") {
+            try db.execute(sql: "ALTER TABLE ingest_verification_records ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+        }
+        if !verificationColumns.contains("next_retry_at") {
+            try db.execute(sql: "ALTER TABLE ingest_verification_records ADD COLUMN next_retry_at REAL")
+        }
+        if !verificationColumns.contains("last_error") {
+            try db.execute(sql: "ALTER TABLE ingest_verification_records ADD COLUMN last_error TEXT")
+        }
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_ingest_verification_clip_id ON ingest_verification_records(clip_id)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_ingest_verification_sync_status ON ingest_verification_records(sync_status)")
+        try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_ingest_verification_next_retry ON ingest_verification_records(next_retry_at)")
     }
 
     /// Persists a parsed screenplay and returns the new script row id.
@@ -796,7 +838,8 @@ public actor GRDBStore {
             mode: mode,
             burnInConfig: burnIn,
             uploadThrottleBytesPerSecond: row["upload_throttle_bps"],
-            transcodeProfile: transcodeProfile
+            transcodeProfile: transcodeProfile,
+            offloadDestinations: (try? decodeJSON(row["offload_destinations"], as: [OffloadDestination].self)) ?? []
         )
     }
 
@@ -972,6 +1015,172 @@ public actor GRDBStore {
                     stage: stage
                 )
             }
+        }
+    }
+
+    public struct IngestVerificationRecord: Codable, Sendable {
+        public var id: String
+        public var clipId: String
+        public var sourcePath: String
+        public var destinationPath: String
+        public var hashAlgorithm: String
+        public var sourceHash: String
+        public var destinationHash: String
+        public var bytesCopied: Int64
+        public var verifiedAt: String
+        public var manifestPath: String?
+        public var syncStatus: String
+        public var attempts: Int
+        public var nextRetryAt: Double?
+        public var lastError: String?
+
+        public init(
+            id: String = UUID().uuidString,
+            clipId: String,
+            sourcePath: String,
+            destinationPath: String,
+            hashAlgorithm: String,
+            sourceHash: String,
+            destinationHash: String,
+            bytesCopied: Int64,
+            verifiedAt: String,
+            manifestPath: String?,
+            syncStatus: String = "pending",
+            attempts: Int = 0,
+            nextRetryAt: Double? = nil,
+            lastError: String? = nil
+        ) {
+            self.id = id
+            self.clipId = clipId
+            self.sourcePath = sourcePath
+            self.destinationPath = destinationPath
+            self.hashAlgorithm = hashAlgorithm
+            self.sourceHash = sourceHash
+            self.destinationHash = destinationHash
+            self.bytesCopied = bytesCopied
+            self.verifiedAt = verifiedAt
+            self.manifestPath = manifestPath
+            self.syncStatus = syncStatus
+            self.attempts = attempts
+            self.nextRetryAt = nextRetryAt
+            self.lastError = lastError
+        }
+    }
+
+    public func saveIngestVerificationRecord(_ record: IngestVerificationRecord) async throws {
+        let queue = try q()
+        try await queue.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO ingest_verification_records (
+                        id, clip_id, source_path, destination_path, hash_algorithm,
+                        source_hash, destination_hash, bytes_copied, verified_at, manifest_path,
+                        sync_status, attempts, next_retry_at, last_error
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        clip_id = excluded.clip_id,
+                        source_path = excluded.source_path,
+                        destination_path = excluded.destination_path,
+                        hash_algorithm = excluded.hash_algorithm,
+                        source_hash = excluded.source_hash,
+                        destination_hash = excluded.destination_hash,
+                        bytes_copied = excluded.bytes_copied,
+                        verified_at = excluded.verified_at,
+                        manifest_path = excluded.manifest_path,
+                        sync_status = excluded.sync_status,
+                        attempts = excluded.attempts,
+                        next_retry_at = excluded.next_retry_at,
+                        last_error = excluded.last_error
+                """,
+                arguments: [
+                    record.id,
+                    record.clipId,
+                    record.sourcePath,
+                    record.destinationPath,
+                    record.hashAlgorithm,
+                    record.sourceHash,
+                    record.destinationHash,
+                    record.bytesCopied,
+                    record.verifiedAt,
+                    record.manifestPath,
+                    record.syncStatus,
+                    record.attempts,
+                    record.nextRetryAt,
+                    record.lastError
+                ]
+            )
+        }
+    }
+
+    public func fetchPendingVerificationRecords(limit: Int = 100) async throws -> [IngestVerificationRecord] {
+        let queue = try q()
+        let now = Date().timeIntervalSince1970
+        return try await queue.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT *
+                    FROM ingest_verification_records
+                    WHERE sync_status IN ('pending', 'retry')
+                      AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                    ORDER BY verified_at ASC
+                    LIMIT ?
+                """,
+                arguments: [now, max(1, limit)]
+            )
+            return rows.map { row in
+                IngestVerificationRecord(
+                    id: row["id"],
+                    clipId: row["clip_id"],
+                    sourcePath: row["source_path"],
+                    destinationPath: row["destination_path"],
+                    hashAlgorithm: row["hash_algorithm"],
+                    sourceHash: row["source_hash"],
+                    destinationHash: row["destination_hash"],
+                    bytesCopied: row["bytes_copied"],
+                    verifiedAt: row["verified_at"],
+                    manifestPath: row["manifest_path"],
+                    syncStatus: row["sync_status"],
+                    attempts: row["attempts"],
+                    nextRetryAt: row["next_retry_at"],
+                    lastError: row["last_error"]
+                )
+            }
+        }
+    }
+
+    public func markVerificationRecordSynced(id: String) async throws {
+        let queue = try q()
+        try await queue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE ingest_verification_records
+                    SET sync_status = 'synced',
+                        next_retry_at = NULL,
+                        last_error = NULL
+                    WHERE id = ?
+                """,
+                arguments: [id]
+            )
+        }
+    }
+
+    public func markVerificationRecordRetry(id: String, attempts: Int, error: String) async throws {
+        let queue = try q()
+        let backoffSeconds = pow(2.0, Double(max(0, attempts - 1))) * 5.0
+        let nextRetry = Date().timeIntervalSince1970 + min(backoffSeconds, 60 * 60)
+        try await queue.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE ingest_verification_records
+                    SET sync_status = 'retry',
+                        attempts = ?,
+                        next_retry_at = ?,
+                        last_error = ?
+                    WHERE id = ?
+                """,
+                arguments: [attempts, nextRetry, error, id]
+            )
         }
     }
 }

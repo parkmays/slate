@@ -409,6 +409,7 @@ export function AnnotationPanel({
               'resize-none border-zinc-800 bg-zinc-950 text-zinc-100 placeholder:text-zinc-600',
               errorMessage && 'border-rose-500/50'
             )}
+            title="Write a note and press Cmd/Ctrl+Enter to post"
             onKeyDown={(event) => {
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault()
@@ -450,6 +451,7 @@ export function AnnotationPanel({
                     isRecording && 'border-rose-500 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20'
                   )}
                   data-testid="voice-record-button"
+                  title={isRecording ? 'Stop voice recording' : 'Start voice recording'}
                 >
                   <span>{isRecording ? '⏹' : '🎤'}</span>
                   <span>{isRecording ? 'Stop' : 'Record'}</span>
@@ -471,6 +473,7 @@ export function AnnotationPanel({
                 onClick={() => void handleSubmit()}
                 disabled={!draft.trim() || isSubmitting || isRecording}
                 data-testid="post-annotation"
+                title="Post annotation (Cmd/Ctrl+Enter)"
               >
                 {isSubmitting ? 'Posting…' : 'Post annotation'}
               </Button>

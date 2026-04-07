@@ -1,84 +1,16 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-
-interface FaceCluster {
-  id: string
-  cluster_key: string
-  display_name: string | null
-  character_name: string | null
-  representative_thumbnail_url: string | null
-}
+import type { ReviewFaceCluster } from '@/lib/review-types'
 
 interface CastCharactersPanelProps {
-  token: string
-  clipId: string
+  clusters: ReviewFaceCluster[]
+  loading: boolean
+  error: string | null
+  onSave: (cluster: ReviewFaceCluster, displayName: string, characterName: string) => Promise<void>
 }
 
-export function CastCharactersPanel({ token, clipId }: CastCharactersPanelProps) {
-  const [clusters, setClusters] = useState<FaceCluster[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let active = true
-    async function load() {
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await fetch(`/api/face-clusters/${clipId}`, {
-          headers: {
-            'X-Share-Token': token,
-          },
-        })
-        const payload = await response.json()
-        if (!response.ok) {
-          throw new Error(payload.error ?? 'Failed to load cast clusters')
-        }
-        if (active) {
-          setClusters(payload.clusters ?? [])
-        }
-      } catch (loadError) {
-        if (active) {
-          setError(loadError instanceof Error ? loadError.message : 'Failed to load cast clusters')
-        }
-      } finally {
-        if (active) {
-          setLoading(false)
-        }
-      }
-    }
-    void load()
-    return () => {
-      active = false
-    }
-  }, [clipId, token])
-
-  async function saveName(cluster: FaceCluster, displayName: string, characterName: string) {
-    const response = await fetch(`/api/face-clusters/${clipId}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Share-Token': token,
-      },
-      body: JSON.stringify({
-        shareToken: token,
-        clusterKey: cluster.cluster_key,
-        displayName,
-        characterName,
-      }),
-    })
-    const payload = await response.json()
-    if (!response.ok || !payload.cluster) {
-      throw new Error(payload.error ?? 'Failed to save cast label')
-    }
-    setClusters((previous) => previous.map((item) => (
-      item.id === cluster.id || item.cluster_key === cluster.cluster_key
-        ? payload.cluster as FaceCluster
-        : item
-    )))
-  }
-
+export function CastCharactersPanel({ clusters, loading, error, onSave }: CastCharactersPanelProps) {
   if (loading) {
     return <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-4 text-sm text-zinc-500">Loading cast clusters…</div>
   }
@@ -98,7 +30,7 @@ export function CastCharactersPanel({ token, clipId }: CastCharactersPanelProps)
   return (
     <div className="space-y-3">
       {clusters.map((cluster) => (
-        <CastClusterRow key={cluster.id} cluster={cluster} onSave={saveName} />
+        <CastClusterRow key={cluster.id} cluster={cluster} onSave={onSave} />
       ))}
     </div>
   )
@@ -108,13 +40,19 @@ function CastClusterRow({
   cluster,
   onSave,
 }: {
-  cluster: FaceCluster
-  onSave: (cluster: FaceCluster, displayName: string, characterName: string) => Promise<void>
+  cluster: ReviewFaceCluster
+  onSave: (cluster: ReviewFaceCluster, displayName: string, characterName: string) => Promise<void>
 }) {
   const [displayName, setDisplayName] = useState(cluster.display_name ?? '')
   const [characterName, setCharacterName] = useState(cluster.character_name ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setDisplayName(cluster.display_name ?? '')
+    setCharacterName(cluster.character_name ?? '')
+    setError(null)
+  }, [cluster.character_name, cluster.display_name, cluster.id])
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
