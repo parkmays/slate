@@ -30,6 +30,10 @@ let package = Package(
             name: "IngestDaemon",
             targets: ["IngestDaemon"]
         ),
+        .library(
+            name: "SLATEProductionSync",
+            targets: ["SLATEProductionSync"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
@@ -94,6 +98,13 @@ let package = Package(
             ]
         ),
         .target(
+            name: "SLATEProductionSync",
+            dependencies: [
+                "SLATESharedTypes"
+            ],
+            path: "packages/production-sync/Sources/SLATEProductionSync"
+        ),
+        .target(
             name: "IngestDaemon",
             dependencies: [
                 "SLATESharedTypes",
@@ -141,6 +152,13 @@ let package = Package(
                 "ExportWriters"
             ],
             path: "packages/export-writers/Tests/ExportWritersTests"
+        ),
+        .testTarget(
+            name: "SLATEProductionSyncTests",
+            dependencies: [
+                "SLATEProductionSync"
+            ],
+            path: "packages/production-sync/Tests/SLATEProductionSyncTests"
         ),
         .testTarget(
             name: "SLATEIntegrationTests",

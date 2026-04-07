@@ -1,0 +1,29 @@
+{
+  "manifestVersion": 5,
+  "id": "com.slate.premiere.panel",
+  "name": "SLATE Review",
+  "version": "0.1.0",
+  "main": "index.html",
+  "host": {
+    "app": "PPRO",
+    "minVersion": "24.0"
+  },
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "slatePanel",
+      "label": {
+        "default": "SLATE"
+      },
+      "minimumSize": {
+        "width": 320,
+        "height": 400
+      }
+    }
+  ],
+  "permissions": {
+    "network": {
+      "domains": "all"
+    }
+  }
+}

@@ -1070,7 +1070,8 @@ public final class CloudSyncStore: ObservableObject {
                     sql: """
                         UPDATE clips
                         SET review_status = ?, annotations = ?, approval_status = ?,
-                            approved_by = ?, approved_at = ?, updated_at = ?
+                            approved_by = ?, approved_at = ?, updated_at = ?,
+                            editorial_updated_at = ?
                         WHERE id = ?
                     """,
                     arguments: [
@@ -1079,6 +1080,7 @@ public final class CloudSyncStore: ObservableObject {
                         update.approvalStatus.rawValue,
                         update.approvedBy,
                         update.approvedAt,
+                        update.updatedAt,
                         update.updatedAt,
                         update.clipId
                     ]
@@ -1558,7 +1560,12 @@ public final class CloudSyncStore: ObservableObject {
             approvedAt: row["approved_at"],
             ingestedAt: row["ingested_at"],
             updatedAt: row["updated_at"],
-            projectMode: ProjectMode(rawValue: row["project_mode"]) ?? .narrative
+            projectMode: ProjectMode(rawValue: row["project_mode"]) ?? .narrative,
+            cameraMetadata: try decodeJSON(row["camera_metadata"], as: CameraMetadata.self),
+            airtableRecordId: row["airtable_record_id"],
+            shotgridEntityId: row["shotgrid_entity_id"],
+            editorialUpdatedAt: row["editorial_updated_at"],
+            customProxyLUTPath: row["custom_proxy_lut_path"]
         )
     }
 

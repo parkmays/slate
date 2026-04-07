@@ -95,6 +95,23 @@ public final class ProjectStore: ObservableObject {
         }
     }
 
+    /// Persists Airtable / ShotGrid credentials and base ids on the project row (GRDB) and refreshes lists.
+    public func persistProjectProductionIntegrations(_ project: Project, clipStore: GRDBClipStore) async throws {
+        let dbPath = GRDBClipStore.defaultDBPath()
+        try await GRDBStore.shared.setup(at: dbPath)
+        try await GRDBStore.shared.saveProject(project)
+        await clipStore.reloadCurrentProject()
+        let merged = ProjectSettingsPersistence.merge(into: project)
+        if let idx = projects.firstIndex(where: { $0.id == merged.id }) {
+            projects[idx] = merged
+        } else {
+            projects.insert(merged, at: 0)
+        }
+        if activeProject?.id == merged.id {
+            activeProject = merged
+        }
+    }
+
     public func setActiveProject(_ project: Project) {
         activeProject = project
     }

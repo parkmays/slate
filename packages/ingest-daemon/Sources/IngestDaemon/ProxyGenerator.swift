@@ -18,6 +18,7 @@ private final class VideoEncodeState: @unchecked Sendable {
     let output: AVAssetReaderTrackOutput
     let input: AVAssetWriterInput
     let lut: ProxyLUT
+    let customCubeURL: URL?
     let clipId: String
     let totalFrames: Int
     let clip: Clip
@@ -31,6 +32,7 @@ private final class VideoEncodeState: @unchecked Sendable {
         output: AVAssetReaderTrackOutput,
         input: AVAssetWriterInput,
         lut: ProxyLUT,
+        customCubeURL: URL?,
         clipId: String,
         totalFrames: Int,
         clip: Clip,
@@ -41,6 +43,7 @@ private final class VideoEncodeState: @unchecked Sendable {
         self.output = output
         self.input = input
         self.lut = lut
+        self.customCubeURL = customCubeURL
         self.clipId = clipId
         self.totalFrames = totalFrames
         self.clip = clip
@@ -62,6 +65,17 @@ private final class AudioEncodeState: @unchecked Sendable {
 }
 
 public actor ProxyGenerator {
+    private static func resolveProxyLUT(for clip: Clip) -> (ProxyLUT, URL?) {
+        if clip.proxyLUT == "custom_cube", let path = clip.customProxyLUTPath, !path.isEmpty,
+           FileManager.default.fileExists(atPath: path) {
+            return (.customCube, URL(fileURLWithPath: path))
+        }
+        if let raw = clip.proxyLUT, let pl = ProxyLUT(rawValue: raw) {
+            return (pl, nil)
+        }
+        return (LUTManager.lut(for: clip.sourceFormat), nil)
+    }
+
     private let dbQueue: DatabaseQueue
     /// Must be the same `GRDBStore` instance as the ingest pipeline so R2 completion updates the correct database (not `GRDBStore.shared` when using a custom DB path).
     private let grdbStore: GRDBStore
@@ -119,7 +133,7 @@ public actor ProxyGenerator {
         // Determine viewing LUT for this clip's source format.
         // Log-encoded formats (ARRIRAW, BRAW, R3D) get a Rec.709 viewing LUT baked in.
         // ProRes / H.264 / MXF are already Rec.709 — pass-through.
-        let selectedLUT = LUTManager.lut(for: clip.sourceFormat)
+        let (selectedLUT, customCubeURL) = Self.resolveProxyLUT(for: clip)
         let proxyColorSpace = selectedLUT.proxyColorSpace   // "rec709" or "log"
 
         // Update status to processing
@@ -248,6 +262,7 @@ public actor ProxyGenerator {
                 output: videoOutput,
                 input: videoInput,
                 lut: selectedLUT,
+                customCubeURL: customCubeURL,
                 clipId: clip.id,
                 totalFrames: totalFrames,
                 clip: clip,
@@ -267,7 +282,11 @@ public actor ProxyGenerator {
                             processingGroup.leave()
                             return
                         }
-                        let processedBuffer = LUTManager.applyProxyLUT(to: sampleBuffer, lut: state.lut) ?? sampleBuffer
+                        let processedBuffer = LUTManager.applyProxyLUT(
+                            to: sampleBuffer,
+                            lut: state.lut,
+                            customCubeURL: state.customCubeURL
+                        ) ?? sampleBuffer
                         var bufferToAppend = processedBuffer
                         if state.burnInConfig.enabled,
                            let pb = CMSampleBufferGetImageBuffer(bufferToAppend) {

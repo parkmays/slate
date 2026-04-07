@@ -15,11 +15,14 @@ public enum ProxyLUT: String, Sendable {
     case bmFilmGen5Rec709   = "bm_film_gen5_rec709"
     case redIPP2Rec709      = "red_ipp2_rec709"
     case none               = "none"
+    /// Sentinel stored in `proxyLUT` when baking a user-supplied `.cube` from `customProxyLUTPath`.
+    case customCube         = "custom_cube"
 
     /// Human-readable output color space tag written to `proxyColorSpace`.
     public var proxyColorSpace: String {
         switch self {
         case .none: return "log"
+        case .customCube: return "rec709"
         default:    return "rec709"
         }
     }
@@ -48,14 +51,29 @@ public struct LUTManager {
     /// Returns `nil` on any failure (caller should fall back to the original buffer).
     /// For `.none` (pass-through formats) returns `nil` — caller keeps the original.
     public static func applyProxyLUT(to sampleBuffer: CMSampleBuffer, lut: ProxyLUT) -> CMSampleBuffer? {
+        applyProxyLUT(to: sampleBuffer, lut: lut, customCubeURL: nil)
+    }
+
+    /// Applies a user `.cube` from disk (when `lut` is `.customCube` and URL is readable).
+    public static func applyProxyLUT(
+        to sampleBuffer: CMSampleBuffer,
+        lut: ProxyLUT,
+        customCubeURL: URL?
+    ) -> CMSampleBuffer? {
         guard lut != .none else { return nil }   // pass-through — no processing needed
         guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
 
         let ciImage = CIImage(cvPixelBuffer: imageBuffer)
 
-        // Try a bundled .cube LUT first; fall back to a parametric approximation.
         let transformed: CIImage
-        if let cubeFilter = buildCubeFilter(lut: lut, input: ciImage) {
+        if lut == .customCube {
+            guard let customCubeURL else { return nil }
+            if let cubeFilter = buildCubeFilter(fromCubeURL: customCubeURL, input: ciImage) {
+                transformed = cubeFilter
+            } else {
+                return nil
+            }
+        } else if let cubeFilter = buildCubeFilter(lut: lut, input: ciImage) {
             transformed = cubeFilter
         } else {
             transformed = parametricRec709Approximation(for: lut, input: ciImage)
@@ -86,8 +104,11 @@ public struct LUTManager {
     /// Loads a 3D .cube LUT from the app bundle and wraps it in a CIColorCubeWithColorSpace filter.
     private static func buildCubeFilter(lut: ProxyLUT, input: CIImage) -> CIImage? {
         guard let cubeURL = bundledLUTURL(for: lut) else { return nil }
+        return buildCubeFilter(fromCubeURL: cubeURL, input: input)
+    }
 
-        guard let cubeData = try? Data(contentsOf: cubeURL),
+    private static func buildCubeFilter(fromCubeURL: URL, input: CIImage) -> CIImage? {
+        guard let cubeData = try? Data(contentsOf: fromCubeURL),
               let (lutData, dimension) = parseCUBEData(cubeData) else {
             return nil
         }
@@ -107,7 +128,7 @@ public struct LUTManager {
         case .arriLogC3Rec709:  resourceName = "arri_logc3_rec709"
         case .bmFilmGen5Rec709: resourceName = "bm_film_gen5_rec709"
         case .redIPP2Rec709:    resourceName = "red_ipp2_rec709"
-        case .none:             return nil
+        case .none, .customCube: return nil
         }
 
         // Search known, deterministic bundles first.
@@ -141,7 +162,7 @@ public struct LUTManager {
         case .arriLogC3Rec709:  gamma = 1.0 / 2.2   // LogC3 is relatively mild
         case .bmFilmGen5Rec709: gamma = 1.0 / 2.6   // BM Film Gen 5 is very flat
         case .redIPP2Rec709:    gamma = 1.0 / 2.4   // IPP2 mid-point
-        case .none:             gamma = 1.0
+        case .none, .customCube: gamma = 1.0
         }
         return input.applyingFilter("CIGammaAdjust", parameters: [
             "inputPower": gamma

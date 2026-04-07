@@ -64,20 +64,34 @@ public actor GRDBStore {
         try await queue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO projects (id, name, mode, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO projects (
+                        id, name, mode, created_at, updated_at,
+                        airtable_api_key, airtable_base_id, shotgrid_script_name, shotgrid_application_key,
+                        shotgrid_site
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         mode = excluded.mode,
                         created_at = excluded.created_at,
-                        updated_at = excluded.updated_at
+                        updated_at = excluded.updated_at,
+                        airtable_api_key = COALESCE(excluded.airtable_api_key, projects.airtable_api_key),
+                        airtable_base_id = COALESCE(excluded.airtable_base_id, projects.airtable_base_id),
+                        shotgrid_script_name = COALESCE(excluded.shotgrid_script_name, projects.shotgrid_script_name),
+                        shotgrid_application_key = COALESCE(excluded.shotgrid_application_key, projects.shotgrid_application_key),
+                        shotgrid_site = COALESCE(excluded.shotgrid_site, projects.shotgrid_site)
                 """,
                 arguments: [
                     project.id,
                     project.name,
                     project.mode.rawValue,
                     project.createdAt,
-                    project.updatedAt
+                    project.updatedAt,
+                    project.airtableAPIKey,
+                    project.airtableBaseId,
+                    project.shotgridScriptName,
+                    project.shotgridApplicationKey,
+                    project.shotgridSite
                 ]
             )
         }
@@ -97,9 +111,11 @@ public actor GRDBStore {
                         ai_scores, transcript_id,
                         ai_processing_status, review_status, annotations, approval_status,
                         approved_by, approved_at, ingested_at, updated_at, project_mode, camera_metadata,
-                        proxy_r2_url, proxy_r2_uploaded_at
+                        proxy_r2_url, proxy_r2_uploaded_at,
+                        airtable_record_id, shotgrid_entity_id, editorial_updated_at,
+                        custom_proxy_lut_path
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         project_id = excluded.project_id,
                         checksum = excluded.checksum,
@@ -134,7 +150,11 @@ public actor GRDBStore {
                         project_mode = excluded.project_mode,
                         camera_metadata = excluded.camera_metadata,
                         proxy_r2_url = excluded.proxy_r2_url,
-                        proxy_r2_uploaded_at = excluded.proxy_r2_uploaded_at
+                        proxy_r2_uploaded_at = excluded.proxy_r2_uploaded_at,
+                        airtable_record_id = excluded.airtable_record_id,
+                        shotgrid_entity_id = excluded.shotgrid_entity_id,
+                        editorial_updated_at = excluded.editorial_updated_at,
+                        custom_proxy_lut_path = excluded.custom_proxy_lut_path
                 """,
                 arguments: try [
                     clip.id,
@@ -171,7 +191,11 @@ public actor GRDBStore {
                     clip.projectMode.rawValue,
                     Self.encodeJSON(clip.cameraMetadata),
                     clip.proxyR2URL,
-                    nil as String?
+                    nil as String?,
+                    clip.airtableRecordId,
+                    clip.shotgridEntityId,
+                    clip.editorialUpdatedAt,
+                    clip.customProxyLUTPath
                 ]
             )
         }
@@ -326,10 +350,10 @@ public actor GRDBStore {
             try db.execute(
                 sql: """
                     UPDATE clips
-                    SET review_status = ?, updated_at = ?
+                    SET review_status = ?, updated_at = ?, editorial_updated_at = ?
                     WHERE id = ?
                 """,
-                arguments: [status.rawValue, updatedAt, clipId]
+                arguments: [status.rawValue, updatedAt, updatedAt, clipId]
             )
         }
     }
@@ -449,6 +473,25 @@ public actor GRDBStore {
             )
         """)
 
+        let projectColumns = Set(try Row.fetchAll(db, sql: "PRAGMA table_info(projects)").compactMap { row in
+            row["name"] as String?
+        })
+        if !projectColumns.contains("airtable_api_key") {
+            try db.execute(sql: "ALTER TABLE projects ADD COLUMN airtable_api_key TEXT")
+        }
+        if !projectColumns.contains("airtable_base_id") {
+            try db.execute(sql: "ALTER TABLE projects ADD COLUMN airtable_base_id TEXT")
+        }
+        if !projectColumns.contains("shotgrid_script_name") {
+            try db.execute(sql: "ALTER TABLE projects ADD COLUMN shotgrid_script_name TEXT")
+        }
+        if !projectColumns.contains("shotgrid_application_key") {
+            try db.execute(sql: "ALTER TABLE projects ADD COLUMN shotgrid_application_key TEXT")
+        }
+        if !projectColumns.contains("shotgrid_site") {
+            try db.execute(sql: "ALTER TABLE projects ADD COLUMN shotgrid_site TEXT")
+        }
+
         try db.execute(sql: """
             CREATE TABLE IF NOT EXISTS clips (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -520,6 +563,18 @@ public actor GRDBStore {
         }
         if !clipColumns.contains("proxy_r2_uploaded_at") {
             try db.execute(sql: "ALTER TABLE clips ADD COLUMN proxy_r2_uploaded_at TEXT")
+        }
+        if !clipColumns.contains("airtable_record_id") {
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN airtable_record_id TEXT")
+        }
+        if !clipColumns.contains("shotgrid_entity_id") {
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN shotgrid_entity_id TEXT")
+        }
+        if !clipColumns.contains("editorial_updated_at") {
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN editorial_updated_at TEXT")
+        }
+        if !clipColumns.contains("custom_proxy_lut_path") {
+            try db.execute(sql: "ALTER TABLE clips ADD COLUMN custom_proxy_lut_path TEXT")
         }
 
         try db.execute(sql: """
@@ -709,7 +764,11 @@ public actor GRDBStore {
             ingestedAt: row["ingested_at"],
             updatedAt: row["updated_at"],
             projectMode: ProjectMode(rawValue: row["project_mode"]) ?? .narrative,
-            cameraMetadata: try decodeJSON(row["camera_metadata"], as: CameraMetadata.self)
+            cameraMetadata: try decodeJSON(row["camera_metadata"], as: CameraMetadata.self),
+            airtableRecordId: row["airtable_record_id"],
+            shotgridEntityId: row["shotgrid_entity_id"],
+            editorialUpdatedAt: row["editorial_updated_at"],
+            customProxyLUTPath: row["custom_proxy_lut_path"]
         )
         // Note: transcript is persisted but not part of the Clip model yet
         return clip

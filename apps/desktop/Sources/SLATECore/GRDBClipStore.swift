@@ -163,7 +163,7 @@ public final class GRDBClipStore: ObservableObject {
                 try Row.fetchAll(
                     db,
                     sql: """
-                        SELECT id, name, mode, created_at, updated_at
+                        SELECT *
                         FROM projects
                         ORDER BY updated_at DESC, created_at DESC
                     """
@@ -195,6 +195,7 @@ public final class GRDBClipStore: ObservableObject {
                     updated_at TEXT NOT NULL
                 )
             """)
+            try Self.migrateProjectsColumnsIfNeeded(in: db)
             try db.execute(sql: """
                 CREATE TABLE IF NOT EXISTS clips (
                     id TEXT PRIMARY KEY NOT NULL,
@@ -410,6 +411,31 @@ public final class GRDBClipStore: ObservableObject {
         }
     }
 
+    private nonisolated static func migrateProjectsColumnsIfNeeded(in db: Database) throws {
+        let columns = try String.fetchAll(
+            db,
+            sql: "SELECT name FROM pragma_table_info('projects')"
+        )
+        func addColumn(_ sql: String) throws {
+            try db.execute(sql: sql)
+        }
+        if !columns.contains("airtable_api_key") {
+            try addColumn("ALTER TABLE projects ADD COLUMN airtable_api_key TEXT")
+        }
+        if !columns.contains("airtable_base_id") {
+            try addColumn("ALTER TABLE projects ADD COLUMN airtable_base_id TEXT")
+        }
+        if !columns.contains("shotgrid_script_name") {
+            try addColumn("ALTER TABLE projects ADD COLUMN shotgrid_script_name TEXT")
+        }
+        if !columns.contains("shotgrid_application_key") {
+            try addColumn("ALTER TABLE projects ADD COLUMN shotgrid_application_key TEXT")
+        }
+        if !columns.contains("shotgrid_site") {
+            try addColumn("ALTER TABLE projects ADD COLUMN shotgrid_site TEXT")
+        }
+    }
+
     private nonisolated static func migrateClipsColumnsIfNeeded(in db: Database) throws {
         let columns = try String.fetchAll(
             db,
@@ -439,6 +465,18 @@ public final class GRDBClipStore: ObservableObject {
         if !columns.contains("proxy_r2_uploaded_at") {
             try addColumn("ALTER TABLE clips ADD COLUMN proxy_r2_uploaded_at TEXT")
         }
+        if !columns.contains("airtable_record_id") {
+            try addColumn("ALTER TABLE clips ADD COLUMN airtable_record_id TEXT")
+        }
+        if !columns.contains("shotgrid_entity_id") {
+            try addColumn("ALTER TABLE clips ADD COLUMN shotgrid_entity_id TEXT")
+        }
+        if !columns.contains("editorial_updated_at") {
+            try addColumn("ALTER TABLE clips ADD COLUMN editorial_updated_at TEXT")
+        }
+        if !columns.contains("custom_proxy_lut_path") {
+            try addColumn("ALTER TABLE clips ADD COLUMN custom_proxy_lut_path TEXT")
+        }
     }
 
     private static func makeStatistics(from clips: [Clip]) -> ProjectStatistics {
@@ -467,7 +505,12 @@ public final class GRDBClipStore: ObservableObject {
             name: row["name"],
             mode: mode,
             createdAt: row["created_at"],
-            updatedAt: row["updated_at"]
+            updatedAt: row["updated_at"],
+            airtableAPIKey: row["airtable_api_key"],
+            airtableBaseId: row["airtable_base_id"],
+            shotgridScriptName: row["shotgrid_script_name"],
+            shotgridApplicationKey: row["shotgrid_application_key"],
+            shotgridSite: row["shotgrid_site"]
         )
     }
 
@@ -506,7 +549,11 @@ public final class GRDBClipStore: ObservableObject {
             ingestedAt: row["ingested_at"],
             updatedAt: row["updated_at"],
             projectMode: ProjectMode(rawValue: row["project_mode"]) ?? .narrative,
-            cameraMetadata: try decodeJSON(row["camera_metadata"], as: CameraMetadata.self)
+            cameraMetadata: try decodeJSON(row["camera_metadata"], as: CameraMetadata.self),
+            airtableRecordId: row["airtable_record_id"],
+            shotgridEntityId: row["shotgrid_entity_id"],
+            editorialUpdatedAt: row["editorial_updated_at"],
+            customProxyLUTPath: row["custom_proxy_lut_path"]
         )
     }
 

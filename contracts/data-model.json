@@ -1,7 +1,7 @@
 {
-  "version": "1.2",
+  "version": "1.4",
   "author": "claude-code",
-  "description": "Universal Clip object schema. v1.2 adds proxyLUT, proxyColorSpace, cameraGroupId fields and cameraGroupSyncResult type. All agents must update their Clip models to include these optional fields.",
+  "description": "Universal Clip object schema. v1.4 adds customProxyLUTPath when proxyLUT is custom_cube; Production Sync ids on clip and integration fields on project.",
   "clip": {
     "id": "string (UUID v4)",
     "projectId": "string (UUID)",
@@ -15,7 +15,7 @@
     "proxyPath": "string|null (canonical R2 key: r2://{bucket}/{projectId}/{clipId}/proxy.mp4)",
     "proxyStatus": "pending|processing|ready|error",
     "proxyChecksum": "string|null",
-    "proxyLUT": "string|null (LUT applied during proxy gen: arri_logc3_rec709 | bm_film_gen5_rec709 | red_ipp2_rec709 | none)",
+    "proxyLUT": "string|null (LUT applied during proxy gen: arri_logc3_rec709 | bm_film_gen5_rec709 | red_ipp2_rec709 | none | custom_cube)",
     "proxyColorSpace": "string|null (always rec709 when LUT applied, log when pass-through)",
     "narrativeMeta": "NarrativeMeta|null",
     "documentaryMeta": "DocumentaryMeta|null",
@@ -35,7 +35,11 @@
     "ingestedAt": "string (ISO 8601)",
     "updatedAt": "string (ISO 8601)",
     "projectMode": "narrative|documentary",
-    "cameraMetadata": "CameraMetadata|null"
+    "cameraMetadata": "CameraMetadata|null",
+    "airtableRecordId": "string|null (Airtable record id for this clip in the project's base)",
+    "shotgridEntityId": "string|null (ShotGrid Version or published file entity id when linked)",
+    "editorialUpdatedAt": "string|null (ISO 8601 — last change to review/editorial fields in SLATE; used for LWW vs Airtable)",
+    "customProxyLUTPath": "string|null (absolute path to a .cube file when proxyLUT = custom_cube; local only)"
   },
   "narrativeMeta": {
     "sceneNumber": "string",
@@ -109,7 +113,12 @@
     "createdAt": "string (ISO 8601)",
     "updatedAt": "string (ISO 8601)",
     "notificationTargets": "DeliveryTarget[]",
-    "autoDeliverOnAssembly": "boolean"
+    "autoDeliverOnAssembly": "boolean",
+    "airtableAPIKey": "string|null (PAT for this project's Airtable base — local GRDB only)",
+    "airtableBaseId": "string|null (Airtable base id app…)",
+    "shotgridScriptName": "string|null (ShotGrid script user name for REST client_credentials)",
+    "shotgridApplicationKey": "string|null (ShotGrid application key / client secret)",
+    "shotgridSite": "string|null (ShotGrid site subdomain, e.g. myshow for myshow.shotgunstudio.com)"
   },
   "deliveryTarget": {
     "name": "string",

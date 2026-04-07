@@ -399,6 +399,15 @@ public struct Clip: Codable, Sendable, Identifiable {
     /// Camera and lens metadata extracted from source file
     public var cameraMetadata: CameraMetadata?
 
+    /// Linked row in the project's Airtable base (Production Sync).
+    public var airtableRecordId: String?
+    /// Linked ShotGrid entity id when using Production Sync.
+    public var shotgridEntityId: String?
+    /// Last time editorial/review fields changed in SLATE (ISO 8601). Used for last-write-wins vs Airtable.
+    public var editorialUpdatedAt: String?
+    /// When `proxyLUT` is `custom_cube`, absolute path to a `.cube` file for proxy bake (local desktop).
+    public var customProxyLUTPath: String?
+
     public init(
         id: String = UUID().uuidString,
         projectId: String,
@@ -433,7 +442,11 @@ public struct Clip: Codable, Sendable, Identifiable {
         ingestedAt: String = ISO8601DateFormatter().string(from: Date()),
         updatedAt: String = ISO8601DateFormatter().string(from: Date()),
         projectMode: ProjectMode,
-        cameraMetadata: CameraMetadata? = nil
+        cameraMetadata: CameraMetadata? = nil,
+        airtableRecordId: String? = nil,
+        shotgridEntityId: String? = nil,
+        editorialUpdatedAt: String? = nil,
+        customProxyLUTPath: String? = nil
     ) {
         self.id = id
         self.projectId = projectId
@@ -469,6 +482,10 @@ public struct Clip: Codable, Sendable, Identifiable {
         self.updatedAt = updatedAt
         self.projectMode = projectMode
         self.cameraMetadata = cameraMetadata
+        self.airtableRecordId = airtableRecordId
+        self.shotgridEntityId = shotgridEntityId
+        self.editorialUpdatedAt = editorialUpdatedAt
+        self.customProxyLUTPath = customProxyLUTPath
     }
 }
 
@@ -536,6 +553,17 @@ public struct Project: Codable, Sendable, Identifiable {
     /// When true, schedules a daily digest while SLATE is running.
     public var dailyDigestEnabled: Bool
 
+    /// Airtable personal access token for this project's base (stored locally in GRDB).
+    public var airtableAPIKey: String?
+    /// Airtable base id (`app…`) for this show.
+    public var airtableBaseId: String?
+    /// ShotGrid script name (client id) for REST authentication.
+    public var shotgridScriptName: String?
+    /// ShotGrid application key (client secret) for REST authentication.
+    public var shotgridApplicationKey: String?
+    /// ShotGrid site subdomain only (e.g. `myshow` for `https://myshow.shotgunstudio.com`).
+    public var shotgridSite: String?
+
     public init(
         id: String = UUID().uuidString,
         name: String,
@@ -546,7 +574,12 @@ public struct Project: Codable, Sendable, Identifiable {
         autoDeliverOnAssembly: Bool = true,
         digestTargets: [DeliveryTarget] = [],
         digestHour: Int = 21,
-        dailyDigestEnabled: Bool = false
+        dailyDigestEnabled: Bool = false,
+        airtableAPIKey: String? = nil,
+        airtableBaseId: String? = nil,
+        shotgridScriptName: String? = nil,
+        shotgridApplicationKey: String? = nil,
+        shotgridSite: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -558,6 +591,11 @@ public struct Project: Codable, Sendable, Identifiable {
         self.digestTargets = digestTargets
         self.digestHour = digestHour
         self.dailyDigestEnabled = dailyDigestEnabled
+        self.airtableAPIKey = airtableAPIKey
+        self.airtableBaseId = airtableBaseId
+        self.shotgridScriptName = shotgridScriptName
+        self.shotgridApplicationKey = shotgridApplicationKey
+        self.shotgridSite = shotgridSite
     }
 }
 

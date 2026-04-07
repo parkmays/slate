@@ -29,6 +29,8 @@ public struct ContentView: View {
     @State private var showingShareSheet = false
     @State private var showingAssemblySheet = false
     @State private var showingCloudSyncSheet = false
+    @State private var showingColorSheet = false
+    @State private var showingProductionSyncSheet = false
     @State private var isImportingMedia = false
     @State private var importNotice: String?
 
@@ -60,10 +62,13 @@ public struct ContentView: View {
             ContentToolbar(
                 isConnected: syncManager.isConnected,
                 hasSelectedProject: hasSelectedProject,
+                hasSelectedClip: selectedClip != nil,
                 showIngestProgress: { showingIngestProgress = true },
                 showShareSheet: { showingShareSheet = true },
                 showAssemblySheet: { showingAssemblySheet = true },
                 showCloudSyncSheet: { showingCloudSyncSheet = true },
+                showColorSheet: { showingColorSheet = true },
+                showProductionSyncSheet: { showingProductionSyncSheet = true },
                 showNewProjectSheet: { appState.showNewProjectSheet = true }
             )
         }
@@ -97,6 +102,16 @@ public struct ContentView: View {
                     cloudSyncStore: cloudSyncStore,
                     cloudAuthManager: cloudAuthManager
                 )
+            }
+        }
+        .sheet(isPresented: $showingColorSheet) {
+            if let clip = selectedClip {
+                ColorGradeSheet(clip: clip, clipStore: clipStore)
+            }
+        }
+        .sheet(isPresented: $showingProductionSyncSheet) {
+            if let project = appState.selectedProject {
+                ProductionSyncSheet(project: project, projectStore: projectStore, clipStore: clipStore)
             }
         }
         .alert(
@@ -331,10 +346,13 @@ public struct ContentView: View {
 private struct ContentToolbar: ToolbarContent {
     let isConnected: Bool
     let hasSelectedProject: Bool
+    let hasSelectedClip: Bool
     let showIngestProgress: () -> Void
     let showShareSheet: () -> Void
     let showAssemblySheet: () -> Void
     let showCloudSyncSheet: () -> Void
+    let showColorSheet: () -> Void
+    let showProductionSyncSheet: () -> Void
     let showNewProjectSheet: () -> Void
 
     var body: some ToolbarContent {
@@ -367,6 +385,20 @@ private struct ContentToolbar: ToolbarContent {
             }
             .help(hasSelectedProject ? "Open Cloud Sync" : "Select a project to configure cloud sync")
             .disabled(!hasSelectedProject)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button(action: showProductionSyncSheet) {
+                Image(systemName: "link")
+            }
+            .help(hasSelectedProject ? "Production Sync (Airtable / ShotGrid)" : "Select a project")
+            .disabled(!hasSelectedProject)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button(action: showColorSheet) {
+                Image(systemName: "cube.transparent")
+            }
+            .help(hasSelectedClip ? "Custom proxy LUT (.cube) for selected clip" : "Select a clip to set a custom LUT")
+            .disabled(!hasSelectedProject || !hasSelectedClip)
         }
         ToolbarItem(placement: .primaryAction) {
             Button(action: showNewProjectSheet) {

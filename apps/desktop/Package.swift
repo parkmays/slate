@@ -21,6 +21,7 @@ let package = Package(
         .package(path: "../../packages/shared-types"),
         .package(path: "../../packages/ingest-daemon"),
         .package(path: "../../packages/export-writers"),
+        .package(path: "../../packages/production-sync"),
 
         // External dependencies
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
@@ -33,6 +34,7 @@ let package = Package(
                 .product(name: "SLATESharedTypes", package: "shared-types"),
                 .product(name: "IngestDaemon", package: "ingest-daemon"),
                 .product(name: "ExportWriters", package: "export-writers"),
+                .product(name: "SLATEProductionSync", package: "production-sync"),
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Supabase", package: "supabase-swift")
             ],

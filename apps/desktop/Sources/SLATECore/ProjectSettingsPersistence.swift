@@ -35,7 +35,12 @@ public enum ProjectSettingsPersistence {
             autoDeliverOnAssembly: p.autoDeliverOnAssembly,
             digestTargets: p.digestTargets,
             digestHour: min(23, max(0, p.digestHour)),
-            dailyDigestEnabled: p.dailyDigestEnabled
+            dailyDigestEnabled: p.dailyDigestEnabled,
+            airtableAPIKey: project.airtableAPIKey,
+            airtableBaseId: project.airtableBaseId,
+            shotgridScriptName: project.shotgridScriptName,
+            shotgridApplicationKey: project.shotgridApplicationKey,
+            shotgridSite: project.shotgridSite
         )
     }
 
