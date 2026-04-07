@@ -38,3 +38,20 @@ If your footage is currently elsewhere, copy or symlink it into that directory b
 - Toolbar customization persists after relaunch.
 - Web walkthrough opens and can replay.
 - No blocking cloud dependency is required for the scripted flow.
+
+## Presenter Shortcut Cheat Sheet
+
+### Desktop
+
+- `Command+N`: New project
+- `Command+Shift+W`: Replay walkthrough
+- `Command+Shift+T`: Customize toolbar
+- `Command+I`: Open ingest progress
+
+### Web Review
+
+- `J / K / L`: Back 10s, play/pause, forward 10s
+- `ArrowUp / ArrowDown`: Previous/next clip
+- `/`: Focus clip search
+- `C / F / X / D`: Quick review status (when flag permissions are enabled)
+- `?`: Replay walkthrough

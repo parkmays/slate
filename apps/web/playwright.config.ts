@@ -6,7 +6,7 @@ import { defineConfig, devices } from '@playwright/test'
 const useMockMode = process.env.REVIEW_E2E_REAL !== '1'
 const devCommand = useMockMode
   ? 'NEXT_PUBLIC_REVIEW_E2E_MODE=mock NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=anon-key SUPABASE_SERVICE_ROLE_KEY=service-role-key npm run dev'
-  : 'NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=anon-key SUPABASE_SERVICE_ROLE_KEY=service-role-key npm run dev'
+  : 'npm run dev'
 
 export default defineConfig({
   testDir: './e2e',

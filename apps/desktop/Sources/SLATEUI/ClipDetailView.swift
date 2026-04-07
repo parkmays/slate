@@ -24,6 +24,7 @@ public struct ClipDetailView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .help("Clip detail tabs: Preview, Info, Sync, AI Scores, and Annotations")
             .padding()
 
             Group {
@@ -400,6 +401,7 @@ private struct ClipAnnotationsView: View {
                     Label("Add Annotation", systemImage: "plus.bubble")
                 }
                 .buttonStyle(.borderedProminent)
+                .help("Add a note at the current clip context")
                 Spacer()
             }
             .padding()

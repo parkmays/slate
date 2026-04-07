@@ -54,7 +54,6 @@ type QuickActionId =
   | 'notes-tab'
   | 'transcript-tab'
   | 'toggle-shortcuts'
-  | 'take-host'
   | 'walkthrough'
 
 const WALKTHROUGH_STORAGE_KEY = 'slate-review-walkthrough-v1'
@@ -699,7 +698,8 @@ export default function ReviewClient({
 
     const savedActions = storage.get(QUICK_ACTIONS_STORAGE_KEY) as QuickActionId[] | null
     if (Array.isArray(savedActions) && savedActions.length > 0) {
-      setQuickActions(savedActions.filter((value) => DEFAULT_QUICK_ACTIONS.includes(value)))
+      const filtered = savedActions.filter((value) => DEFAULT_QUICK_ACTIONS.includes(value))
+      setQuickActions(filtered.length > 0 ? filtered : DEFAULT_QUICK_ACTIONS)
     }
   }, [])
 
@@ -1119,19 +1119,19 @@ export default function ReviewClient({
   const walkthroughSteps = useMemo(() => ([
     {
       title: 'Clip Browser',
-      body: 'Use the left panel to search, filter, and select footage.',
+      body: 'Use left panel search and filters to pick a hero clip fast.',
     },
     {
       title: 'Playback',
-      body: 'Use J/K/L to shuttle and Arrow keys to move between clips.',
+      body: 'Use J/K/L to shuttle and Arrow Up/Down to move between clips.',
     },
     {
       title: 'Notes & Status',
-      body: 'Add annotations, mark status, and switch inspector tabs quickly.',
+      body: 'Add an annotation, then mark status (C/F/X/D) to demonstrate review flow.',
     },
     {
       title: 'Quick Actions',
-      body: 'Pin your preferred controls in the quick-actions bar for live demos.',
+      body: 'Pin your preferred controls in Quick Actions. Press ? any time to replay this tour.',
     },
   ]), [])
 
@@ -1194,27 +1194,6 @@ export default function ReviewClient({
       case 'toggle-shortcuts':
         setShowShortcutOverlay((value) => !value)
         break
-      case 'take-host': {
-        const hostId = viewerIdRef.current
-        setWatchPartyHostId(hostId)
-        const video = primaryVideoElement()
-        const channel = activeChannelRef.current
-        if (video && channel) {
-          void channel.send({
-            type: 'broadcast',
-            event: 'watch_party_state',
-            payload: {
-              hostId,
-              viewerId: viewerIdRef.current,
-              kind: 'seek',
-              currentTime: video.currentTime,
-              isPlaying: !video.paused,
-              sentAt: new Date().toISOString(),
-            },
-          })
-        }
-        break
-      }
       case 'walkthrough':
         setShowWalkthrough(true)
         setWalkthroughStep(0)
@@ -1902,7 +1881,6 @@ export default function ReviewClient({
                         action === 'notes-tab' ? 'Open Notes tab (N)' :
                         action === 'transcript-tab' ? 'Open Transcript tab (T)' :
                         action === 'toggle-shortcuts' ? 'Toggle shortcut legend' :
-                        action === 'take-host' ? 'Take watch-party host' :
                         'Replay walkthrough (?)'
                       }
                       className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800"
@@ -1911,7 +1889,6 @@ export default function ReviewClient({
                         action === 'notes-tab' ? 'Notes' :
                         action === 'transcript-tab' ? 'Transcript' :
                         action === 'toggle-shortcuts' ? (showShortcutOverlay ? 'Hide shortcuts' : 'Show shortcuts') :
-                        action === 'take-host' ? 'Take host' :
                         'Walkthrough'}
                     </button>
                   ))}
@@ -2139,6 +2116,7 @@ export default function ReviewClient({
             <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Prototype walkthrough</p>
             <h3 className="mt-2 text-base font-semibold text-zinc-100">{walkthroughSteps[walkthroughStep]?.title}</h3>
             <p className="mt-2 text-sm text-zinc-300">{walkthroughSteps[walkthroughStep]?.body}</p>
+            <p className="mt-2 text-xs text-zinc-500">Shortcut recap: J/K/L shuttle, Arrow keys clip nav, / focus search, ? replay tour.</p>
             <div className="mt-4 flex items-center justify-between gap-3">
               <button
                 type="button"
@@ -2182,7 +2160,6 @@ export default function ReviewClient({
                       action === 'notes-tab' ? 'Open Notes tab' :
                       action === 'transcript-tab' ? 'Open Transcript tab' :
                       action === 'toggle-shortcuts' ? 'Toggle shortcuts legend' :
-                      action === 'take-host' ? 'Take host' :
                       'Replay walkthrough'}
                   </span>
                   <div className="flex items-center gap-2">

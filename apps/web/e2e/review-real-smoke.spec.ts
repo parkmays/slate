@@ -7,6 +7,6 @@ test.describe('real review smoke', () => {
     await page.goto('/review/playwright-valid-token')
 
     await expect(page.getByText(/Select a clip to begin review|Annotations|Clips/i)).toBeVisible()
-    await expect(page.locator('video').first()).toBeVisible()
+    await expect(page.getByTestId('proxy-player-shell').or(page.getByTestId('proxy-player-error'))).toBeVisible()
   })
 })

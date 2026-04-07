@@ -53,7 +53,7 @@ public struct ContentView: View {
 
     private var rootView: some View {
         VStack(spacing: 0) {
-            if appState.startupError != nil || !supabaseManager.isConfigured {
+            if shouldShowStatusBanner {
                 statusBanner
                     .padding(.horizontal, 12)
                     .padding(.top, 12)
@@ -278,6 +278,12 @@ public struct ContentView: View {
 
     private var hasSelectedProject: Bool {
         appState.selectedProject != nil
+    }
+
+    private var shouldShowStatusBanner: Bool {
+        appState.startupError != nil
+            || !supabaseManager.isConfigured
+            || ProcessInfo.processInfo.environment["SLATE_DEMO_LOCAL_MODE"] == "1"
     }
 
     @ViewBuilder

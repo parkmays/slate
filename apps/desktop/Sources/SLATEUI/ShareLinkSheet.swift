@@ -88,6 +88,12 @@ public struct ShareLinkSheet: View {
         isGenerating = true
         errorMessage = nil
 
+        if !supabaseManager.isConfigured {
+            errorMessage = "Share links are unavailable in local demo mode. Configure Supabase or continue with local playback."
+            isGenerating = false
+            return
+        }
+
         // C4: Use the live session token. Falls back to SLATE_DEBUG_JWT for local
         // testing without a full Supabase Auth flow.
         let jwt = supabaseManager.accessToken

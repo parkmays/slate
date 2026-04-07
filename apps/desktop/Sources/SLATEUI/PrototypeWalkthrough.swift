@@ -30,17 +30,17 @@ enum WalkthroughStep: Int, CaseIterable, Identifiable {
     var message: String {
         switch self {
         case .welcome:
-            return "This guided walkthrough helps you run the prototype demo flow quickly."
+            return "Use this quick tour to rehearse the meeting flow in under two minutes."
         case .selectProject:
-            return "Use the sidebar to pick a project or the + toolbar button to create one."
+            return "Pick a project in the sidebar, or press Command+N to create one."
         case .browseClips:
-            return "Use search, filters, and view toggles to surface the right take fast."
+            return "Use search and filters to find the hero take quickly for playback."
         case .clipDetail:
-            return "Open a clip to preview proxy, sync confidence, AI signals, and notes."
+            return "Open a clip and call out proxy playback, sync confidence, and AI notes."
         case .shareReview:
-            return "Use Share Project to open reviewer-ready flows. Local demo mode still works offline."
+            return "Use Share Project for reviewer flow. In local demo mode, continue offline without blocking."
         case .shortcuts:
-            return "Use Command+Shift+W to replay this tour and toolbar hints for action shortcuts."
+            return "Replay this tour with Command+Shift+W. Press Enter to advance steps and Esc to skip."
         }
     }
 }
@@ -63,6 +63,9 @@ struct WalkthroughOverlayCard: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Text("Tip: Enter = next, Esc = skip")
+                .font(.caption2)
+                .foregroundColor(.secondary)
 
             HStack(spacing: 8) {
                 Text("Step \(step.rawValue + 1) of \(totalSteps)")

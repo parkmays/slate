@@ -115,6 +115,7 @@ public struct MultiCamPreviewView: View {
                                 Label("Circle Best", systemImage: "sparkles")
                             }
                             .buttonStyle(.borderedProminent)
+                            .help("Automatically circle best take candidate")
                             .disabled(project?.mode != .narrative)
 
                             Spacer()
@@ -154,6 +155,7 @@ public struct MultiCamPreviewView: View {
                 Label("Close", systemImage: "xmark.circle.fill")
             }
             .buttonStyle(.borderless)
+            .help("Close multi-cam preview")
 
             Spacer()
 
@@ -170,6 +172,7 @@ public struct MultiCamPreviewView: View {
                     Image(systemName: "chevron.left")
                 }
                 .disabled(!canStepPrevious)
+                .help("Previous multi-cam group")
 
                 Button {
                     navigateGroup(delta: 1)
@@ -177,6 +180,7 @@ public struct MultiCamPreviewView: View {
                     Image(systemName: "chevron.right")
                 }
                 .disabled(!canStepNext)
+                .help("Next multi-cam group")
             }
         }
         .padding(.horizontal, 12)
@@ -204,6 +208,7 @@ public struct MultiCamPreviewView: View {
                         .font(.title2)
                 }
                 .buttonStyle(.borderless)
+                .help("Play/Pause multi-cam")
 
                 Text(playback.masterTimecodeDisplay)
                     .font(.caption.monospaced())
