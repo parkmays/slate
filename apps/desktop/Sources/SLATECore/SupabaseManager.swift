@@ -49,8 +49,8 @@ public final class SupabaseManager: ObservableObject {
     // MARK: - Init
 
     public init() {
-        let urlStr = ProcessInfo.processInfo.environment["SLATE_SUPABASE_URL"] ?? ""
-        let key    = ProcessInfo.processInfo.environment["SLATE_SUPABASE_ANON_KEY"] ?? ""
+        let urlStr = ProcessInfo.processInfo.environment["SLATE_SUPABASE_URL"] ?? "https://ynachumtgwkrpeuxjevf.supabase.co"
+        let key    = ProcessInfo.processInfo.environment["SLATE_SUPABASE_ANON_KEY"] ?? "sb_publishable_xeBOh6BBL_nM7hs_ewSGxg_uH8i_UYO"
 
         Self.logger.info("Initializing SupabaseManager")
         
@@ -61,7 +61,7 @@ public final class SupabaseManager: ObservableObject {
             Self.logger.warning("SLATE_SUPABASE_ANON_KEY environment variable not set")
         }
 
-        if let url = Self.validSupabaseURL(from: urlStr), Self.isLikelyJWT(key) {
+        if let url = Self.validSupabaseURL(from: urlStr), Self.isValidKey(key) {
             let c = SupabaseClient(supabaseURL: url, supabaseKey: key)
             self.client       = c
             self.isConfigured = true
@@ -83,7 +83,7 @@ public final class SupabaseManager: ObservableObject {
     /// Bypasses env-var lookup so tests can supply exact values without
     /// mutating ProcessInfo.
     init(supabaseURLString: String, anonKey: String) {
-        if let url = Self.validSupabaseURL(from: supabaseURLString), Self.isLikelyJWT(anonKey) {
+        if let url = Self.validSupabaseURL(from: supabaseURLString), Self.isValidKey(anonKey) {
             let c = SupabaseClient(supabaseURL: url, supabaseKey: anonKey)
             self.client       = c
             self.isConfigured = true
@@ -118,6 +118,25 @@ public final class SupabaseManager: ObservableObject {
         authError = nil
         do {
             try await client.auth.signIn(email: email, password: password)
+            // session / isAuthenticated are updated by the authStateChanges listener.
+        } catch {
+            authError = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    // MARK: - Google OAuth
+
+    /// Signs in with Google OAuth. Sets authError on failure.
+    public func signInWithGoogle() async {
+        guard let client else {
+            authError = "Supabase is not configured."
+            return
+        }
+        isLoading = true
+        authError = nil
+        do {
+            try await client.auth.signInWithOAuth(provider: .google, redirectTo: URL(string: "slate://auth/callback"))
             // session / isAuthenticated are updated by the authStateChanges listener.
         } catch {
             authError = error.localizedDescription
@@ -192,37 +211,43 @@ public final class SupabaseManager: ObservableObject {
         return url
     }
 
-    private static func isLikelyJWT(_ value: String) -> Bool {
-        guard !value.isEmpty else {
-            logger.debug("JWT value is empty")
+    private static func isValidKey(_ key: String) -> Bool {
+        guard !key.isEmpty else {
+            logger.debug("Key value is empty")
             return false
         }
 
-        let segments = value.split(separator: ".")
+        // Accept both standard JWT format and the custom sb_publishable format
+        if key.hasPrefix("sb_publishable_") {
+            return key.count > "sb_publishable_".count
+        }
+
+        // Standard JWT validation
+        let segments = key.split(separator: ".")
         guard segments.count == 3 else {
-            logger.error("JWT does not have 3 segments (found \(segments.count))")
+            logger.error("Key does not have 3 segments (found \(segments.count))")
             return false
         }
 
         guard let payloadData = segments[1].base64URLDecodedData else {
-            logger.error("JWT payload segment is not valid base64url")
+            logger.error("Key payload segment is not valid base64url")
             return false
         }
         
         // Optional: Validate basic JWT structure, but don't require valid JSON
         // Some JWT-like tokens may have non-JSON payloads (e.g., encrypted tokens)
         if String(data: payloadData, encoding: .utf8) != nil {
-            logger.debug("JWT payload appears to be valid UTF-8 text")
+            logger.debug("Key payload appears to be valid UTF-8 text")
             // Try to parse as JSON for additional validation, but don't fail if it's not JSON
             do {
                 _ = try JSONSerialization.jsonObject(with: payloadData)
-                logger.debug("JWT payload is valid JSON")
+                logger.debug("Key payload is valid JSON")
             } catch {
-                logger.debug("JWT payload is not JSON but appears valid (may be encrypted or custom format)")
+                logger.debug("Key payload is not JSON but appears valid (may be encrypted or custom format)")
             }
             return true
         } else {
-            logger.debug("JWT payload is binary data (may be encrypted)")
+            logger.debug("Key payload is binary data (may be encrypted)")
             return true
         }
     }

@@ -123,7 +123,7 @@ private struct IngestProgressRow: View {
     }
 }
 
-private extension IngestStage {
+extension IngestStage {
     var description: String {
         switch self {
         case .checksum: return "Calculating checksum"

@@ -137,6 +137,23 @@ private struct SignInCard: View {
 
             Divider().background(Color.white.opacity(0.1))
 
+            // Google OAuth button
+            Button {
+                Task { await signInWithGoogle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 16))
+                    Text("Continue with Google")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(supabaseManager.isLoading)
+            .help("Sign in with your Google account")
+
+            Divider().background(Color.white.opacity(0.1))
+
             // Offline escape hatch
             Button("Continue Offline") {
                 // Posting this custom notification causes SLATEApp to treat the
@@ -163,6 +180,10 @@ private struct SignInCard: View {
 
     private func signIn() async {
         await supabaseManager.signIn(email: email, password: password)
+    }
+    
+    private func signInWithGoogle() async {
+        await supabaseManager.signInWithGoogle()
     }
 }
 
